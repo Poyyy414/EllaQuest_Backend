@@ -1,12 +1,10 @@
-const express = require('express');
-const router = express.Router();
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 // ================= REGISTER =================
 const register = async (req, res) => {
-    const { name, email, password } = req.body;
+    const { first_name, last_name, email, password } = req.body;
 
     try {
         // Auto-detect role based on email
@@ -31,8 +29,8 @@ const register = async (req, res) => {
 
         // Insert into users
         const userResult = await pool.query(
-            'INSERT INTO users (name, email, password, role_id) VALUES ($1, $2, $3, $4) RETURNING user_id',
-            [name, email, hashedPassword, role_id]
+            'INSERT INTO users (first_name, last_name, email, password, role_id) VALUES ($1, $2, $3, $4, $5) RETURNING user_id',
+            [first_name, last_name, email, hashedPassword, role_id]
         );
         const user_id = userResult.rows[0].user_id;
 
@@ -49,7 +47,7 @@ const register = async (req, res) => {
 
 // ================= CREATE ACCOUNT (Admin/Curriculum Manager) =================
 const createAccount = async (req, res) => {
-    const { name, email, password, role } = req.body;
+    const { first_name, last_name, email, password, role } = req.body;
 
     try {
         // Only allow admin and curriculum_manager
@@ -70,8 +68,8 @@ const createAccount = async (req, res) => {
 
         // Insert into users
         const userResult = await pool.query(
-            'INSERT INTO users (name, email, password, role_id) VALUES ($1, $2, $3, $4) RETURNING user_id',
-            [name, email, hashedPassword, role_id]
+            'INSERT INTO users (first_name, last_name, email, password, role_id) VALUES ($1, $2, $3, $4, $5) RETURNING user_id',
+            [first_name, last_name, email, hashedPassword, role_id]
         );
         const user_id = userResult.rows[0].user_id;
 
@@ -92,7 +90,7 @@ const login = async (req, res) => {
 
     try {
         const result = await pool.query(
-            `SELECT u.user_id, u.name, u.password, r.role_name
+            `SELECT u.user_id, u.first_name, u.last_name, u.password, r.role_name
              FROM users u
              JOIN roles r ON u.role_id = r.role_id
              WHERE u.email = $1`,
@@ -106,7 +104,7 @@ const login = async (req, res) => {
         if (!isMatch) return res.status(400).json({ message: 'Invalid Credentials' });
 
         const token = jwt.sign(
-            { user_id: user.user_id, name: user.name, role: user.role_name },
+            { user_id: user.user_id, first_name: user.first_name, last_name: user.last_name, role: user.role_name },
             process.env.JWT_SECRET,
             { expiresIn: process.env.JWT_ACCESS_EXPIRATION }
         );
