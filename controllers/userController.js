@@ -1,3 +1,5 @@
+const express = require('express');
+const router = express.Router();
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -7,51 +9,36 @@ const register = async (req, res) => {
     const { name, email, password } = req.body;
 
     try {
-        // 1️⃣ Auto-detect role based on email
+        // Auto-detect role based on email
         const studentEmailRegex = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
         const instructorEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
 
         let role = null;
+        if (studentEmailRegex.test(email)) role = 'student';
+        else if (instructorEmailRegex.test(email)) role = 'instructor';
+        else return res.status(400).json({ 
+            message: 'Only @gbox.ncf.edu.ph (students) and @ncf.edu.ph (instructors) emails are allowed'
+        });
 
-        if (studentEmailRegex.test(email)) {
-            role = 'student';
-        } else if (instructorEmailRegex.test(email)) {
-            role = 'instructor';
-        } else {
-            return res.status(400).json({ 
-                message: 'Only @gbox.ncf.edu.ph (students) and @ncf.edu.ph (instructors) emails are allowed to register' 
-            });
-        }
-
-        // 2️⃣ Get role_id
-        const roleResult = await pool.query(
-            'SELECT role_id FROM roles WHERE role_name = $1',
-            [role]
-        );
-
-        if (roleResult.rows.length === 0) {
-            return res.status(400).json({ message: 'Role not found' });
-        }
+        // Get role_id
+        const roleResult = await pool.query('SELECT role_id FROM roles WHERE role_name = $1', [role]);
+        if (roleResult.rows.length === 0) return res.status(400).json({ message: 'Role not found' });
 
         const role_id = roleResult.rows[0].role_id;
 
-        // 3️⃣ Hash password
+        // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // 4️⃣ Insert into users table
+        // Insert into users
         const userResult = await pool.query(
             'INSERT INTO users (name, email, password, role_id) VALUES ($1, $2, $3, $4) RETURNING user_id',
             [name, email, hashedPassword, role_id]
         );
-
         const user_id = userResult.rows[0].user_id;
 
-        // 5️⃣ Insert into role-specific table
-        if (role === 'student') {
-            await pool.query('INSERT INTO student (user_id) VALUES ($1)', [user_id]);
-        } else if (role === 'instructor') {
-            await pool.query('INSERT INTO instructor (user_id) VALUES ($1)', [user_id]);
-        }
+        // Insert into role-specific table
+        if (role === 'student') await pool.query('INSERT INTO student (user_id) VALUES ($1)', [user_id]);
+        else if (role === 'instructor') await pool.query('INSERT INTO instructor (user_id) VALUES ($1)', [user_id]);
 
         res.status(201).json({ message: `User registered successfully as ${role}` });
 
@@ -60,45 +47,37 @@ const register = async (req, res) => {
     }
 };
 
-// ================= CREATE ACCOUNT (Admin/Curriculum Manager - by system only) =================
+// ================= CREATE ACCOUNT (Admin/Curriculum Manager) =================
 const createAccount = async (req, res) => {
     const { name, email, password, role } = req.body;
 
     try {
         // Only allow admin and curriculum_manager
         if (!['admin', 'curriculum_manager'].includes(role)) {
-            return res.status(400).json({ message: 'This endpoint is only for admin and curriculum_manager accounts' });
+            return res.status(400).json({ message: 'This endpoint is only for admin/curriculum_manager' });
         }
 
-        // Must use @ncf.edu.ph email
+        // Staff email validation
         const staffEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
-        if (!staffEmailRegex.test(email)) {
-            return res.status(400).json({ message: 'Staff must use a @ncf.edu.ph email address' });
-        }
+        if (!staffEmailRegex.test(email)) return res.status(400).json({ message: 'Staff must use @ncf.edu.ph email' });
 
-        const roleResult = await pool.query(
-            'SELECT role_id FROM roles WHERE role_name = $1', [role]
-        );
-
-        if (roleResult.rows.length === 0) {
-            return res.status(400).json({ message: 'Role not found' });
-        }
-
+        // Get role_id
+        const roleResult = await pool.query('SELECT role_id FROM roles WHERE role_name = $1', [role]);
+        if (roleResult.rows.length === 0) return res.status(400).json({ message: 'Role not found' });
         const role_id = roleResult.rows[0].role_id;
+
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        // Insert into users
         const userResult = await pool.query(
             'INSERT INTO users (name, email, password, role_id) VALUES ($1, $2, $3, $4) RETURNING user_id',
             [name, email, hashedPassword, role_id]
         );
-
         const user_id = userResult.rows[0].user_id;
 
-        if (role === 'admin') {
-            await pool.query('INSERT INTO admin (user_id) VALUES ($1)', [user_id]);
-        } else if (role === 'curriculum_manager') {
-            await pool.query('INSERT INTO curriculum_manager (user_id) VALUES ($1)', [user_id]);
-        }
+        // Insert into admin or curriculum_manager table
+        if (role === 'admin') await pool.query('INSERT INTO admin (user_id) VALUES ($1)', [user_id]);
+        else if (role === 'curriculum_manager') await pool.query('INSERT INTO curriculum_manager (user_id) VALUES ($1)', [user_id]);
 
         res.status(201).json({ message: `Account created successfully as ${role}` });
 
@@ -120,16 +99,11 @@ const login = async (req, res) => {
             [email]
         );
 
-        if (result.rows.length === 0) {
-            return res.status(400).json({ message: 'Invalid Credentials' });
-        }
+        if (result.rows.length === 0) return res.status(400).json({ message: 'Invalid Credentials' });
 
         const user = result.rows[0];
-
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(400).json({ message: 'Invalid Credentials' });
-        }
+        if (!isMatch) return res.status(400).json({ message: 'Invalid Credentials' });
 
         const token = jwt.sign(
             { user_id: user.user_id, name: user.name, role: user.role_name },
@@ -144,8 +118,9 @@ const login = async (req, res) => {
     }
 };
 
+// ================= EXPORT =================
 module.exports = {
     register,
-    login,
-    createAccount
+    createAccount,
+    login
 };
