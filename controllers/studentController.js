@@ -7,7 +7,13 @@ const getProfile = async (req, res) => {
 
     try {
         const result = await pool.query(
-            `SELECT u.user_id, u.name, u.email, r.role_name, u.created_at
+            `SELECT 
+                u.user_id, 
+                u.first_name,
+                u.last_name,
+                u.email, 
+                r.role_name, 
+                u.created_at
              FROM users u
              JOIN roles r ON u.role_id = r.role_id
              JOIN student s ON u.user_id = s.user_id
@@ -28,7 +34,7 @@ const getProfile = async (req, res) => {
 // ================= UPDATE OWN PROFILE =================
 const updateProfile = async (req, res) => {
     const user_id = req.user.user_id;
-    const { name, email } = req.body;
+    const { first_name, last_name, email } = req.body;
 
     try {
         const studentEmailRegex = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
@@ -40,16 +46,23 @@ const updateProfile = async (req, res) => {
 
         const result = await pool.query(
             `UPDATE users 
-             SET name = $1, email = $2, updated_at = CURRENT_TIMESTAMP
-             WHERE user_id = $3 RETURNING user_id, name, email, updated_at`,
-            [name, email, user_id]
+             SET first_name = $1, 
+                 last_name = $2,
+                 email = $3, 
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = $4 
+             RETURNING user_id, first_name, last_name, email, updated_at`,
+            [first_name, last_name, email, user_id]
         );
 
         if (result.rows.length === 0) {
             return res.status(404).json({ message: 'Student not found' });
         }
 
-        res.json({ message: 'Profile updated successfully', user: result.rows[0] });
+        res.json({ 
+            message: 'Profile updated successfully', 
+            user: result.rows[0] 
+        });
     } catch (error) {
         res.status(500).json({ message: 'Error updating profile', error: error.message });
     }
@@ -70,15 +83,23 @@ const changePassword = async (req, res) => {
             return res.status(404).json({ message: 'Student not found' });
         }
 
-        const isMatch = await bcrypt.compare(current_password, userResult.rows[0].password);
+        const isMatch = await bcrypt.compare(
+            current_password, 
+            userResult.rows[0].password
+        );
+
         if (!isMatch) {
-            return res.status(400).json({ message: 'Current password is incorrect' });
+            return res.status(400).json({ 
+                message: 'Current password is incorrect' 
+            });
         }
 
         const hashedPassword = await bcrypt.hash(new_password, 10);
 
         await pool.query(
-            `UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP
+            `UPDATE users 
+             SET password = $1, 
+                 updated_at = CURRENT_TIMESTAMP
              WHERE user_id = $2`,
             [hashedPassword, user_id]
         );
@@ -105,7 +126,6 @@ const getEnrolledCourses = async (req, res) => {
             return res.status(404).json({ message: 'Student not found' });
         }
 
-        // TODO: Join with courses table once created
         res.json({ 
             message: 'Enrolled courses will be available once courses table is set up',
             student_id: result.rows[0].student_id
