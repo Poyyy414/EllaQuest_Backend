@@ -18,22 +18,22 @@ const {
 const { authMiddleware, authorizeRoles } = require('../middleware/authMiddleware');
 
 // ================= PROFILE =================
-router.get('/profile', authMiddleware, authorizeRoles('curriculum_manager'), getProfile);
-router.put('/profile', authMiddleware, authorizeRoles('curriculum_manager'), updateProfile);
-router.put('/change-password', authMiddleware, authorizeRoles('curriculum_manager'), changePassword);
+router.get('/curriculum-manager/profile', authMiddleware, authorizeRoles('curriculum_manager'), getProfile);
+router.put('/curriculum-manager/profile', authMiddleware, authorizeRoles('curriculum_manager'), updateProfile);
+router.put('/curriculum-manager/change-password', authMiddleware, authorizeRoles('curriculum_manager'), changePassword);
 
 // ================= MATERIALS =================
-router.post('/materials', authMiddleware, authorizeRoles('curriculum_manager'), createMaterial);
-router.get('/materials', authMiddleware, authorizeRoles('curriculum_manager'), getAllMaterials);
-router.get('/materials/:material_id', authMiddleware, authorizeRoles('curriculum_manager'), getMaterialById);
-router.put('/materials/:material_id', authMiddleware, authorizeRoles('curriculum_manager'), updateMaterial);
-router.delete('/materials/:material_id', authMiddleware, authorizeRoles('curriculum_manager'), deleteMaterial);
+router.post('/curriculum-manager/create/materials', authMiddleware, authorizeRoles('curriculum_manager'), createMaterial);
+router.get('/curriculum-manager/materials', authMiddleware, authorizeRoles('curriculum_manager'), getAllMaterials);
+router.get('/curriculum-manager/materials/:material_id', authMiddleware, authorizeRoles('curriculum_manager'), getMaterialById);
+router.put('/curriculum-manager/materials/:material_id', authMiddleware, authorizeRoles('curriculum_manager'), updateMaterial);
+router.delete('/curriculum-manager/materials/:material_id', authMiddleware, authorizeRoles('curriculum_manager'), deleteMaterial);
 
 // ================= QUESTS =================
-router.post('/quests', authMiddleware, authorizeRoles('curriculum_manager'), createQuest);
-router.get('/quests', authMiddleware, authorizeRoles('curriculum_manager'), getAllQuests);
-router.get('/quests/:quest_id', authMiddleware, authorizeRoles('curriculum_manager'), getQuestById);
-router.put('/quests/:quest_id', authMiddleware, authorizeRoles('curriculum_manager'), updateQuest);
-router.delete('/quests/:quest_id', authMiddleware, authorizeRoles('curriculum_manager'), deleteQuest);
+router.post('/curriculum-manager/create/quests', authMiddleware, authorizeRoles('curriculum_manager'), createQuest);
+router.get('/curriculum-manager/quests', authMiddleware, authorizeRoles('curriculum_manager'), getAllQuests);
+router.get('/curriculum-manager/quests/:quest_id', authMiddleware, authorizeRoles('curriculum_manager'), getQuestById);
+router.put('/curriculum-manager/quests/:quest_id', authMiddleware, authorizeRoles('curriculum_manager'), updateQuest);
+router.delete('/curriculum-manager/quests/:quest_id', authMiddleware, authorizeRoles('curriculum_manager'), deleteQuest);
 
 module.exports = router;

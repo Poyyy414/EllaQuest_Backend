@@ -6,9 +6,9 @@ const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const courseRoutes = require('./routes/courseRoutes');
 const enrollmentRoutes = require('./routes/enrollmentRoutes');
-// const curriculumManagerRoutes = require('./routes/curriculumManagerRoutes');
-// const instructorRoutes = require('./routes/instructorRoutes');
-// const studentRoutes = require('./routes/studentRoutes');
+const curriculumManagerRoutes = require('./routes/curriculumManagerRoutes');
+const instructorRoutes = require('./routes/instructorRoutes');
+const studentRoutes = require('./routes/studentRoutes');
 
 const app = express();
 app.use(cors());
@@ -19,13 +19,12 @@ app.get('/', (req, res) => {
 });
 
 app.use('/', userRoutes);
-app.use('/admin', adminRoutes);
-app.use('/course', courseRoutes);
-app.use('/enrollment', enrollmentRoutes);
-
-// app.use('/curriculum-manager', curriculumManagerRoutes);
-// app.use('/instructor', instructorRoutes);
-// app.use('/student', studentRoutes);
+app.use('/', adminRoutes);
+app.use('/', courseRoutes);
+app.use('/', enrollmentRoutes);
+app.use('/', curriculumManagerRoutes);
+app.use('/', instructorRoutes);
+app.use('/', studentRoutes);
 
 const PORT = process.env.PORT || 5000;
 
