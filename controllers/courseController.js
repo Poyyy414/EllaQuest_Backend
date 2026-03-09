@@ -1,22 +1,20 @@
-const pool = require("../config/database"); // your pg Pool instance
+const pool = require("../config/database");
 const crypto = require("crypto");
 
 // ─────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────
-
-/** Generates a random uppercase alphanumeric code, e.g. "A3F9KZ" */
 const generateCourseCode = () =>
   crypto.randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
 
 // ─────────────────────────────────────────────
 // INSTRUCTOR — Create a Course
-// POST /api/courses
+// POST /api/courses/create
 // Body: { title, description }
 // ─────────────────────────────────────────────
 const createCourse = async (req, res) => {
   const { title, description } = req.body;
-  const instructor_id = req.user.user_id; // from auth middleware
+  const instructor_id = req.user.user_id;
 
   if (!title) {
     return res.status(400).json({ message: "Title is required." });
@@ -26,7 +24,6 @@ const createCourse = async (req, res) => {
     let course_code;
     let isUnique = false;
 
-    // Keep generating until we get a unique code
     while (!isUnique) {
       course_code = generateCourseCode();
       const existing = await pool.query(
@@ -62,16 +59,13 @@ const regenerateCourseCode = async (req, res) => {
   const instructor_id = req.user.user_id;
 
   try {
-    // Verify ownership
     const course = await pool.query(
       "SELECT * FROM courses WHERE course_id = $1 AND instructor_id = $2",
       [course_id, instructor_id]
     );
 
     if (course.rowCount === 0) {
-      return res
-        .status(403)
-        .json({ message: "Course not found or unauthorized." });
+      return res.status(403).json({ message: "Course not found or unauthorized." });
     }
 
     let course_code;
@@ -117,7 +111,6 @@ const joinCourse = async (req, res) => {
   }
 
   try {
-    // Find course by code
     const courseResult = await pool.query(
       "SELECT * FROM courses WHERE course_code = $1",
       [course_code.toUpperCase()]
@@ -129,17 +122,12 @@ const joinCourse = async (req, res) => {
 
     const course = courseResult.rows[0];
 
-    // Prevent instructor from joining their own course
     if (course.instructor_id === student_id) {
-      return res
-        .status(400)
-        .json({ message: "Instructors cannot join their own course." });
+      return res.status(400).json({ message: "Instructors cannot join their own course." });
     }
 
-    // Check if already enrolled or pending
     const existing = await pool.query(
-      `SELECT * FROM enrollments
-       WHERE course_id = $1 AND student_id = $2`,
+      `SELECT * FROM enrollments WHERE course_id = $1 AND student_id = $2`,
       [course.course_id, student_id]
     );
 
@@ -153,7 +141,6 @@ const joinCourse = async (req, res) => {
       });
     }
 
-    // Insert enrollment as pending
     await pool.query(
       `INSERT INTO enrollments (course_id, student_id, status, joined_at)
        VALUES ($1, $2, 'pending', NOW())`,
@@ -161,8 +148,7 @@ const joinCourse = async (req, res) => {
     );
 
     return res.status(200).json({
-      message:
-        "Join request sent. You will be enrolled once the instructor approves.",
+      message: "Join request sent. You will be enrolled once the instructor approves.",
       course: {
         course_id: course.course_id,
         title: course.title,
@@ -183,16 +169,13 @@ const getPendingRequests = async (req, res) => {
   const instructor_id = req.user.user_id;
 
   try {
-    // Verify ownership
     const course = await pool.query(
       "SELECT course_id FROM courses WHERE course_id = $1 AND instructor_id = $2",
       [course_id, instructor_id]
     );
 
     if (course.rowCount === 0) {
-      return res
-        .status(403)
-        .json({ message: "Course not found or unauthorized." });
+      return res.status(403).json({ message: "Course not found or unauthorized." });
     }
 
     const result = await pool.query(
@@ -219,26 +202,21 @@ const getPendingRequests = async (req, res) => {
 // ─────────────────────────────────────────────
 const handleEnrollment = async (req, res) => {
   const { course_id, enrollment_id } = req.params;
-  const { action } = req.body; // "approve" or "reject"
+  const { action } = req.body;
   const instructor_id = req.user.user_id;
 
   if (!["approve", "reject"].includes(action)) {
-    return res
-      .status(400)
-      .json({ message: 'Action must be "approve" or "reject".' });
+    return res.status(400).json({ message: 'Action must be "approve" or "reject".' });
   }
 
   try {
-    // Verify course ownership
     const course = await pool.query(
       "SELECT course_id FROM courses WHERE course_id = $1 AND instructor_id = $2",
       [course_id, instructor_id]
     );
 
     if (course.rowCount === 0) {
-      return res
-        .status(403)
-        .json({ message: "Course not found or unauthorized." });
+      return res.status(403).json({ message: "Course not found or unauthorized." });
     }
 
     const newStatus = action === "approve" ? "enrolled" : "rejected";
@@ -251,9 +229,7 @@ const handleEnrollment = async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-      return res
-        .status(404)
-        .json({ message: "Enrollment request not found or already handled." });
+      return res.status(404).json({ message: "Enrollment request not found or already handled." });
     }
 
     return res.status(200).json({
@@ -287,7 +263,6 @@ const getCourse = async (req, res) => {
     const course = result.rows[0];
     const isInstructor = course.instructor_id === user_id;
 
-    // Check if student is enrolled
     if (!isInstructor) {
       const enrollment = await pool.query(
         `SELECT status FROM enrollments
@@ -295,22 +270,52 @@ const getCourse = async (req, res) => {
         [course_id, user_id]
       );
 
-      if (
-        enrollment.rowCount === 0 ||
-        enrollment.rows[0].status !== "enrolled"
-      ) {
-        return res
-          .status(403)
-          .json({ message: "Access denied. You are not enrolled." });
+      if (enrollment.rowCount === 0 || enrollment.rows[0].status !== "enrolled") {
+        return res.status(403).json({ message: "Access denied. You are not enrolled." });
       }
     }
 
-    // Hide course_code from students
     if (!isInstructor) delete course.course_code;
 
     return res.status(200).json({ course });
   } catch (err) {
     console.error("getCourse error:", err);
+    return res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+// ─────────────────────────────────────────────
+// STUDENT — Get All My Enrolled Courses
+// GET /api/courses/my-courses
+// ─────────────────────────────────────────────
+const getMyCourses = async (req, res) => {
+  const student_id = req.user.user_id;
+
+  try {
+    const result = await pool.query(
+      `SELECT 
+         e.enrollment_id,
+         e.status,
+         e.joined_at,
+         c.course_id,
+         c.title,
+         c.description,
+         u.first_name AS instructor_first_name,
+         u.last_name  AS instructor_last_name
+       FROM enrollments e
+       JOIN courses c ON c.course_id = e.course_id
+       JOIN users u ON u.user_id = c.instructor_id
+       WHERE e.student_id = $1 AND e.status = 'enrolled'
+       ORDER BY e.joined_at DESC`,
+      [student_id]
+    );
+
+    return res.status(200).json({
+      total: result.rowCount,
+      courses: result.rows,
+    });
+  } catch (err) {
+    console.error("getMyCourses error:", err);
     return res.status(500).json({ message: "Internal server error." });
   }
 };
@@ -322,4 +327,5 @@ module.exports = {
   getPendingRequests,
   handleEnrollment,
   getCourse,
+  getMyCourses,
 };
