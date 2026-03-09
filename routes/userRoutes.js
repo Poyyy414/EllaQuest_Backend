@@ -1,5 +1,4 @@
 const express = require('express');
-const { createAccount } = require('../controllers/userController');
 const { register, login, createAccount, sendVerificationCode } = require('../controllers/userController');
 
 const router = express.Router();
