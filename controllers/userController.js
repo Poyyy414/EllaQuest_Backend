@@ -1,12 +1,134 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 
-// ================= REGISTER =================
-const register = async (req, res) => {
-    const { first_name, last_name, email, password } = req.body;
+// ================= NODEMAILER SETUP =================
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
+
+// ================= SEND VERIFICATION CODE =================
+const sendVerificationCode = async (req, res) => {
+    const { email } = req.body;
 
     try {
+        // Validate email domain
+        const studentEmailRegex = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
+        const instructorEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
+
+        if (!studentEmailRegex.test(email) && !instructorEmailRegex.test(email)) {
+            return res.status(400).json({ 
+                message: 'Only @gbox.ncf.edu.ph or @ncf.edu.ph emails are allowed' 
+            });
+        }
+
+        // Check existing record
+        const existing = await pool.query(
+            'SELECT * FROM email_verification WHERE email = $1',
+            [email]
+        );
+
+        if (existing.rows.length > 0) {
+            const record = existing.rows[0];
+
+            // Check max resend attempts (3 max)
+            if (record.attempts >= 3) {
+                return res.status(429).json({ 
+                    message: 'Maximum resend attempts reached. Please try again later.' 
+                });
+            }
+
+            // Check resend cooldown (1 minute)
+            if (record.resend_at && new Date() < new Date(record.resend_at)) {
+                const secondsLeft = Math.ceil((new Date(record.resend_at) - new Date()) / 1000);
+                return res.status(429).json({ 
+                    message: `Please wait ${secondsLeft} seconds before requesting a new code.`,
+                    secondsLeft
+                });
+            }
+        }
+
+        // Generate 6-digit code
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiry = new Date(Date.now() + 10 * 60 * 1000);    // expires in 10 minutes
+        const resend_at = new Date(Date.now() + 1 * 60 * 1000);  // resend cooldown 1 minute
+        const attempts = (existing.rows[0]?.attempts || 0) + 1;
+
+        // Delete old and insert new
+        await pool.query('DELETE FROM email_verification WHERE email = $1', [email]);
+        await pool.query(
+            'INSERT INTO email_verification (email, code, expiry, resend_at, attempts, verified) VALUES ($1, $2, $3, $4, $5, false)',
+            [email, code, expiry, resend_at, attempts]
+        );
+
+        // Send email
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER,
+            to: email,
+            subject: 'NCF Email Verification Code',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 400px; margin: auto;">
+                    <h2 style="color: #2c3e50;">NCF Verification Code</h2>
+                    <p>Your verification code is:</p>
+                    <h1 style="letter-spacing: 8px; color: #e74c3c;">${code}</h1>
+                    <p>This code expires in <strong>10 minutes</strong>.</p>
+                    <p>You have <strong>${3 - attempts}</strong> resend attempt(s) remaining.</p>
+                    <p style="color: #999; font-size: 12px;">If you did not request this, please ignore this email.</p>
+                </div>
+            `
+        });
+
+        res.json({ 
+            message: 'Verification code sent! Check your email.',
+            attemptsLeft: 3 - attempts,
+            resendIn: 60
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error sending code', error: error.message });
+    }
+};
+
+// ================= REGISTER (with inline code verification) =================
+const register = async (req, res) => {
+    const { first_name, last_name, email, password, code } = req.body;
+
+    try {
+        // Check verification code
+        const verifyResult = await pool.query(
+            'SELECT * FROM email_verification WHERE email = $1',
+            [email]
+        );
+
+        if (verifyResult.rows.length === 0) {
+            return res.status(400).json({ 
+                message: 'No verification code found. Please request a code first.' 
+            });
+        }
+
+        const record = verifyResult.rows[0];
+
+        // Check expiry
+        if (new Date() > new Date(record.expiry)) {
+            return res.status(400).json({ 
+                message: 'Code has expired. Please request a new one.',
+                expired: true
+            });
+        }
+
+        // Check code match
+        if (record.code !== code) {
+            return res.status(400).json({ 
+                message: 'Invalid verification code. Please try again.',
+                invalid: true
+            });
+        }
+
         // Auto-detect role based on email
         const studentEmailRegex = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
         const instructorEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
@@ -19,9 +141,10 @@ const register = async (req, res) => {
         });
 
         // Get role_id
-        const roleResult = await pool.query('SELECT role_id FROM roles WHERE role_name = $1', [role]);
+        const roleResult = await pool.query(
+            'SELECT role_id FROM roles WHERE role_name = $1', [role]
+        );
         if (roleResult.rows.length === 0) return res.status(400).json({ message: 'Role not found' });
-
         const role_id = roleResult.rows[0].role_id;
 
         // Hash password
@@ -35,8 +158,14 @@ const register = async (req, res) => {
         const user_id = userResult.rows[0].user_id;
 
         // Insert into role-specific table
-        if (role === 'student') await pool.query('INSERT INTO student (user_id) VALUES ($1)', [user_id]);
-        else if (role === 'instructor') await pool.query('INSERT INTO instructor (user_id) VALUES ($1)', [user_id]);
+        if (role === 'student') {
+            await pool.query('INSERT INTO student (user_id) VALUES ($1)', [user_id]);
+        } else if (role === 'instructor') {
+            await pool.query('INSERT INTO instructor (user_id) VALUES ($1)', [user_id]);
+        }
+
+        // Clean up verification record
+        await pool.query('DELETE FROM email_verification WHERE email = $1', [email]);
 
         res.status(201).json({ message: `User registered successfully as ${role}` });
 
@@ -50,32 +179,32 @@ const createAccount = async (req, res) => {
     const { first_name, last_name, email, password, role } = req.body;
 
     try {
-        // Only allow admin and curriculum_manager
         if (!['admin', 'curriculum_manager'].includes(role)) {
             return res.status(400).json({ message: 'This endpoint is only for admin/curriculum_manager' });
         }
 
-        // Staff email validation
         const staffEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
-        if (!staffEmailRegex.test(email)) return res.status(400).json({ message: 'Staff must use @ncf.edu.ph email' });
+        if (!staffEmailRegex.test(email)) {
+            return res.status(400).json({ message: 'Staff must use @ncf.edu.ph email' });
+        }
 
-        // Get role_id
         const roleResult = await pool.query('SELECT role_id FROM roles WHERE role_name = $1', [role]);
         if (roleResult.rows.length === 0) return res.status(400).json({ message: 'Role not found' });
         const role_id = roleResult.rows[0].role_id;
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Insert into users
         const userResult = await pool.query(
             'INSERT INTO users (first_name, last_name, email, password, role_id) VALUES ($1, $2, $3, $4, $5) RETURNING user_id',
             [first_name, last_name, email, hashedPassword, role_id]
         );
         const user_id = userResult.rows[0].user_id;
 
-        // Insert into admin or curriculum_manager table
-        if (role === 'admin') await pool.query('INSERT INTO admin (user_id) VALUES ($1)', [user_id]);
-        else if (role === 'curriculum_manager') await pool.query('INSERT INTO curriculum_manager (user_id) VALUES ($1)', [user_id]);
+        if (role === 'admin') {
+            await pool.query('INSERT INTO admin (user_id) VALUES ($1)', [user_id]);
+        } else if (role === 'curriculum_manager') {
+            await pool.query('INSERT INTO curriculum_manager (user_id) VALUES ($1)', [user_id]);
+        }
 
         res.status(201).json({ message: `Account created successfully as ${role}` });
 
@@ -104,7 +233,12 @@ const login = async (req, res) => {
         if (!isMatch) return res.status(400).json({ message: 'Invalid Credentials' });
 
         const token = jwt.sign(
-            { user_id: user.user_id, first_name: user.first_name, last_name: user.last_name, role: user.role_name },
+            { 
+                user_id: user.user_id, 
+                first_name: user.first_name, 
+                last_name: user.last_name, 
+                role: user.role_name 
+            },
             process.env.JWT_SECRET,
             { expiresIn: process.env.JWT_ACCESS_EXPIRATION }
         );
@@ -120,5 +254,6 @@ const login = async (req, res) => {
 module.exports = {
     register,
     createAccount,
-    login
+    login,
+    sendVerificationCode
 };
