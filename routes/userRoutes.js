@@ -8,7 +8,7 @@ router.post('/register', register);
 router.post('/login', login);
 router.post('/send-verification-code', sendVerificationCode);
 router.post('/create-account', createAccount);
-rout
+
 
 
 module.exports = router;
