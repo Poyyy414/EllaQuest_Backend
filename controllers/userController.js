@@ -1,16 +1,9 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend'); // ✅ correct Resend import
 
-// ================= NODEMAILER SETUP =================
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
-});
+const resend = new Resend(process.env.RESEND_API_KEY); // ✅ uses env variable
 
 // ================= SEND VERIFICATION CODE =================
 const sendVerificationCode = async (req, res) => {
@@ -55,8 +48,8 @@ const sendVerificationCode = async (req, res) => {
 
         // Generate 6-digit code
         const code = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiry = new Date(Date.now() + 10 * 60 * 1000);    // expires in 10 minutes
-        const resend_at = new Date(Date.now() + 1 * 60 * 1000);  // resend cooldown 1 minute
+        const expiry = new Date(Date.now() + 10 * 60 * 1000);   // 10 minutes
+        const resend_at = new Date(Date.now() + 1 * 60 * 1000); // 1 minute cooldown
         const attempts = (existing.rows[0]?.attempts || 0) + 1;
 
         // Delete old and insert new
@@ -66,9 +59,9 @@ const sendVerificationCode = async (req, res) => {
             [email, code, expiry, resend_at, attempts]
         );
 
-        // Send email
-        await transporter.sendMail({
-            from: process.env.EMAIL_USER,
+        // ✅ Send email via Resend
+        await resend.emails.send({
+            from: 'NCF System <onboarding@resend.dev>',
             to: email,
             subject: 'NCF Email Verification Code',
             html: `
