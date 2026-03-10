@@ -1,18 +1,43 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 
-// ================= BREVO SMTP SETUP (port 465) =================
-const transporter = nodemailer.createTransport({
-    host: 'smtp-relay.brevo.com',
-    port: 465,
-    secure: true, // true for port 465
-    auth: {
-        user: process.env.BREVO_SENDER_EMAIL,
-        pass: process.env.BREVO_SMTP_KEY
+// ================= BREVO HTTP API (no SMTP, works on Render free tier) =================
+const sendEmail = async (to, code, attempts) => {
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+            'api-key': process.env.BREVO_API_KEY,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            sender: { 
+                email: process.env.BREVO_SENDER_EMAIL, 
+                name: 'NCF System' 
+            },
+            to: [{ email: to }],
+            subject: 'NCF Email Verification Code',
+            htmlContent: `
+                <div style="font-family: Arial, sans-serif; max-width: 400px; margin: auto;">
+                    <h2 style="color: #2c3e50;">NCF Verification Code</h2>
+                    <p>Your verification code is:</p>
+                    <h1 style="letter-spacing: 8px; color: #e74c3c;">${code}</h1>
+                    <p>This code expires in <strong>10 minutes</strong>.</p>
+                    <p>You have <strong>${3 - attempts}</strong> resend attempt(s) remaining.</p>
+                    <p style="color: #999; font-size: 12px;">If you did not request this, please ignore this email.</p>
+                </div>
+            `
+        })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.message || 'Failed to send email');
     }
-});
+
+    return data;
+};
 
 // ================= SEND VERIFICATION CODE =================
 const sendVerificationCode = async (req, res) => {
@@ -68,22 +93,8 @@ const sendVerificationCode = async (req, res) => {
             [email, code, expiry, resend_at, attempts]
         );
 
-        // Send email via Brevo SMTP
-        await transporter.sendMail({
-            from: `"NCF System" <${process.env.BREVO_SENDER_EMAIL}>`,
-            to: email,
-            subject: 'NCF Email Verification Code',
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 400px; margin: auto;">
-                    <h2 style="color: #2c3e50;">NCF Verification Code</h2>
-                    <p>Your verification code is:</p>
-                    <h1 style="letter-spacing: 8px; color: #e74c3c;">${code}</h1>
-                    <p>This code expires in <strong>10 minutes</strong>.</p>
-                    <p>You have <strong>${3 - attempts}</strong> resend attempt(s) remaining.</p>
-                    <p style="color: #999; font-size: 12px;">If you did not request this, please ignore this email.</p>
-                </div>
-            `
-        });
+        // ✅ Send via Brevo HTTP API
+        await sendEmail(email, code, attempts);
 
         res.json({ 
             message: 'Verification code sent! Check your email.',
