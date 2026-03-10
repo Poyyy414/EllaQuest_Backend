@@ -1,12 +1,18 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const Brevo = require('@getbrevo/brevo');
+const nodemailer = require('nodemailer'); // ✅ use nodemailer with Brevo SMTP
 
-// ================= BREVO SETUP =================
-const brevoClient = Brevo.ApiClient.instance;
-brevoClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
-const emailApi = new Brevo.TransactionalEmailsApi();
+// ================= BREVO SMTP SETUP =================
+const transporter = nodemailer.createTransport({
+    host: 'smtp-relay.brevo.com',
+    port: 587,
+    secure: false,
+    auth: {
+        user: process.env.BREVO_SENDER_EMAIL, // your verified sender email
+        pass: process.env.BREVO_SMTP_KEY      // Brevo SMTP key (not API key)
+    }
+});
 
 // ================= SEND VERIFICATION CODE =================
 const sendVerificationCode = async (req, res) => {
@@ -62,12 +68,12 @@ const sendVerificationCode = async (req, res) => {
             [email, code, expiry, resend_at, attempts]
         );
 
-        // ✅ Send email via Brevo
-        await emailApi.sendTransacEmail({
-            sender: { email: process.env.BREVO_SENDER_EMAIL, name: 'NCF System' },
-            to: [{ email: email }],
+        // ✅ Send email via Brevo SMTP
+        await transporter.sendMail({
+            from: `"NCF System" <${process.env.BREVO_SENDER_EMAIL}>`,
+            to: email,
             subject: 'NCF Email Verification Code',
-            htmlContent: `
+            html: `
                 <div style="font-family: Arial, sans-serif; max-width: 400px; margin: auto;">
                     <h2 style="color: #2c3e50;">NCF Verification Code</h2>
                     <p>Your verification code is:</p>
