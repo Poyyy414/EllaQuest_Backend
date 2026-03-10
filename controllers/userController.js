@@ -2,7 +2,7 @@ const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-// ================= BREVO HTTP API (no SMTP, works on Render free tier) =================
+// ================= BREVO HTTP API =================
 const sendEmail = async (to, code, attempts) => {
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
@@ -31,6 +31,7 @@ const sendEmail = async (to, code, attempts) => {
     });
 
     const data = await response.json();
+    console.log('Brevo response:', JSON.stringify(data)); // ✅ debug log
 
     if (!response.ok) {
         throw new Error(data.message || 'Failed to send email');
@@ -42,6 +43,10 @@ const sendEmail = async (to, code, attempts) => {
 // ================= SEND VERIFICATION CODE =================
 const sendVerificationCode = async (req, res) => {
     const { email } = req.body;
+
+    // ✅ Debug: log env vars on every request
+    console.log('BREVO_API_KEY:', process.env.BREVO_API_KEY ? 'LOADED ✅' : 'MISSING ❌');
+    console.log('BREVO_SENDER_EMAIL:', process.env.BREVO_SENDER_EMAIL ? 'LOADED ✅' : 'MISSING ❌');
 
     try {
         // Validate email domain
@@ -93,7 +98,7 @@ const sendVerificationCode = async (req, res) => {
             [email, code, expiry, resend_at, attempts]
         );
 
-        // ✅ Send via Brevo HTTP API
+        // Send via Brevo HTTP API
         await sendEmail(email, code, attempts);
 
         res.json({ 
