@@ -9,6 +9,7 @@ const enrollmentRoutes = require('./routes/enrollmentRoutes');
 const curriculumManagerRoutes = require('./routes/curriculumManagerRoutes');
 const instructorRoutes = require('./routes/instructorRoutes');
 const studentRoutes = require('./routes/studentRoutes');
+const questRoutes = require('./routes/questRoutes');
 
 const app = express();
 app.use(cors());
@@ -25,6 +26,7 @@ app.use('/', enrollmentRoutes);
 app.use('/', curriculumManagerRoutes);
 app.use('/', instructorRoutes);
 app.use('/', studentRoutes);
+app.use('/', questRoutes);
 
 const PORT = process.env.PORT || 5000;
 
