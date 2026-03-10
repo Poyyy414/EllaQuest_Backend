@@ -19,14 +19,15 @@ app.get('/', (req, res) => {
     res.send('Welcome to the Ella Quest API!');
 });
 
-app.use('/', userRoutes);
-app.use('/', adminRoutes);
-app.use('/', courseRoutes);
-app.use('/', enrollmentRoutes);
-app.use('/', curriculumManagerRoutes);
-app.use('/', instructorRoutes);
-app.use('/', studentRoutes);
-app.use('/', questRoutes);
+// ================= ROUTES =================
+app.use('/api/user', userRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/courses', courseRoutes);
+app.use('/api/enrollment', enrollmentRoutes);
+app.use('/api/curriculum-manager', curriculumManagerRoutes);
+app.use('/api/instructor', instructorRoutes);
+app.use('/api/student', studentRoutes);
+app.use('/api/quests', questRoutes);
 
 const PORT = process.env.PORT || 5000;
 
