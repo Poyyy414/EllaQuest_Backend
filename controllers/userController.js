@@ -1,16 +1,16 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer'); // ✅ use nodemailer with Brevo SMTP
+const nodemailer = require('nodemailer');
 
-// ================= BREVO SMTP SETUP =================
+// ================= BREVO SMTP SETUP (port 465) =================
 const transporter = nodemailer.createTransport({
     host: 'smtp-relay.brevo.com',
-    port: 587,
-    secure: false,
+    port: 465,
+    secure: true, // true for port 465
     auth: {
-        user: process.env.BREVO_SENDER_EMAIL, // your verified sender email
-        pass: process.env.BREVO_SMTP_KEY      // Brevo SMTP key (not API key)
+        user: process.env.BREVO_SENDER_EMAIL,
+        pass: process.env.BREVO_SMTP_KEY
     }
 });
 
@@ -68,7 +68,7 @@ const sendVerificationCode = async (req, res) => {
             [email, code, expiry, resend_at, attempts]
         );
 
-        // ✅ Send email via Brevo SMTP
+        // Send email via Brevo SMTP
         await transporter.sendMail({
             from: `"NCF System" <${process.env.BREVO_SENDER_EMAIL}>`,
             to: email,
@@ -101,7 +101,6 @@ const register = async (req, res) => {
     const { first_name, last_name, email, password, code } = req.body;
 
     try {
-        // Check verification code
         const verifyResult = await pool.query(
             'SELECT * FROM email_verification WHERE email = $1',
             [email]
@@ -115,7 +114,6 @@ const register = async (req, res) => {
 
         const record = verifyResult.rows[0];
 
-        // Check expiry
         if (new Date() > new Date(record.expiry)) {
             return res.status(400).json({ 
                 message: 'Code has expired. Please request a new one.',
@@ -123,7 +121,6 @@ const register = async (req, res) => {
             });
         }
 
-        // Check code match
         if (record.code !== code) {
             return res.status(400).json({ 
                 message: 'Invalid verification code. Please try again.',
@@ -131,7 +128,6 @@ const register = async (req, res) => {
             });
         }
 
-        // Auto-detect role based on email
         const studentEmailRegex = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
         const instructorEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
 
@@ -142,31 +138,26 @@ const register = async (req, res) => {
             message: 'Only @gbox.ncf.edu.ph (students) and @ncf.edu.ph (instructors) emails are allowed'
         });
 
-        // Get role_id
         const roleResult = await pool.query(
             'SELECT role_id FROM roles WHERE role_name = $1', [role]
         );
         if (roleResult.rows.length === 0) return res.status(400).json({ message: 'Role not found' });
         const role_id = roleResult.rows[0].role_id;
 
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Insert into users
         const userResult = await pool.query(
             'INSERT INTO users (first_name, last_name, email, password, role_id) VALUES ($1, $2, $3, $4, $5) RETURNING user_id',
             [first_name, last_name, email, hashedPassword, role_id]
         );
         const user_id = userResult.rows[0].user_id;
 
-        // Insert into role-specific table
         if (role === 'student') {
             await pool.query('INSERT INTO student (user_id) VALUES ($1)', [user_id]);
         } else if (role === 'instructor') {
             await pool.query('INSERT INTO instructor (user_id) VALUES ($1)', [user_id]);
         }
 
-        // Clean up verification record
         await pool.query('DELETE FROM email_verification WHERE email = $1', [email]);
 
         res.status(201).json({ message: `User registered successfully as ${role}` });
