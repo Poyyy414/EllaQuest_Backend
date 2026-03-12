@@ -7,7 +7,9 @@ const {
     updateSection,
     deleteSection,
     updateStudentStatus,
-    getPendingStudents
+    getPendingStudents,
+    joinSection
+
 } = require('../controllers/sectionController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
@@ -21,5 +23,8 @@ router.delete('/:section_id', authMiddleware, deleteSection);
 // Student management
 router.get('/:section_id/pending', authMiddleware, getPendingStudents);
 router.put('/:section_id/students/:ss_id', authMiddleware, updateStudentStatus);
+
+//student join section
+router.post('/:section_id/join', authMiddleware, joinSection);
 
 module.exports = router;

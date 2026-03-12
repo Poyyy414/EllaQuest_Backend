@@ -308,6 +308,64 @@ const getPendingStudents = async (req, res) => {
     }
 };
 
+// ================= JOIN SECTION (Student) =================
+const joinSection = async (req, res) => {
+    const { section_code } = req.body;
+
+    try {
+        if (req.user.role !== 'student') {
+            return res.status(403).json({ message: 'Only students can join sections' });
+        }
+
+        // Get student_id
+        const studentResult = await pool.query(
+            'SELECT student_id FROM student WHERE user_id = $1',
+            [req.user.user_id]
+        );
+        if (studentResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Student not found' });
+        }
+        const student_id = studentResult.rows[0].student_id;
+
+        // Find section by code
+        const sectionResult = await pool.query(
+            'SELECT * FROM section WHERE section_code = $1 AND is_active = true',
+            [section_code]
+        );
+        if (sectionResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Invalid or inactive section code' });
+        }
+        const section = sectionResult.rows[0];
+
+        // Check if already enrolled
+        const existing = await pool.query(
+            'SELECT * FROM section_student WHERE student_id = $1 AND section_id = $2',
+            [student_id, section.section_id]
+        );
+        if (existing.rows.length > 0) {
+            return res.status(400).json({ 
+                message: `You already enrolled in this section with status: ${existing.rows[0].status}` 
+            });
+        }
+
+        // Insert with pending status
+        const result = await pool.query(
+            `INSERT INTO section_student (student_id, section_id, status)
+             VALUES ($1, $2, 'pending')
+             RETURNING *`,
+            [student_id, section.section_id]
+        );
+
+        res.status(201).json({
+            message: 'Enrollment request sent! Please wait for instructor approval.',
+            enrollment: result.rows[0]
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error joining section', error: error.message });
+    }
+};
+
 module.exports = {
     createSection,
     getSectionsByCourse,
@@ -315,5 +373,6 @@ module.exports = {
     updateSection,
     deleteSection,
     updateStudentStatus,
-    getPendingStudents
+    getPendingStudents,
+    joinSection
 };
