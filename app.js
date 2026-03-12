@@ -27,7 +27,7 @@ app.use('/api/curriculum-manager', curriculumManagerRoutes);
 app.use('/api/instructor', instructorRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/quests', questRoutes);
-app.use('/api/sections', sectionRoutes);
+app.use('/api/courses/:course_id/sections', sectionRoutes);
 
 const PORT = process.env.PORT || 5000;
 
