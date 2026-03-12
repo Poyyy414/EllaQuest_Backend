@@ -5,7 +5,6 @@ const cors = require('cors');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const courseRoutes = require('./routes/courseRoutes');
-const enrollmentRoutes = require('./routes/enrollmentRoutes');
 const curriculumManagerRoutes = require('./routes/curriculumManagerRoutes');
 const instructorRoutes = require('./routes/instructorRoutes');
 const studentRoutes = require('./routes/studentRoutes');
@@ -23,7 +22,6 @@ app.get('/', (req, res) => {
 app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/courses', courseRoutes);
-app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/curriculum-manager', curriculumManagerRoutes);
 app.use('/api/instructor', instructorRoutes);
 app.use('/api/student', studentRoutes);
