@@ -1,27 +1,21 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const { authMiddleware: auth } = require("../middleware/authMiddleware");
 const {
-  createCourse,
-  regenerateCourseCode,
-  joinCourse,
-  getPendingRequests,
-  handleEnrollment,
-  getCourse,
-  getMyCourses,
-} = require("../controllers/courseController");
+    createCourse,
+    getMyCourses,
+    getCourseById,
+    updateCourse,
+    deleteCourse
+} = require('../controllers/courseController');
+const { authMiddleware } = require('../middleware/authMiddleware');
 
-// ── Instructor Routes ──────────────────────────────────
-router.post("/create",                                    auth, createCourse);
-router.patch("/:course_id/regenerate-code",               auth, regenerateCourseCode);
-router.get("/:course_id/pending",                         auth, getPendingRequests);
-router.patch("/:course_id/enrollment/:enrollment_id",     auth, handleEnrollment);
+// Specific routes first
+router.get('/my-courses', authMiddleware, getMyCourses);
 
-// ── Student Routes ─────────────────────────────────────
-router.post("/join",                                      auth, joinCourse);      // Body: { course_code }
-router.get("/my-courses",                                 auth, getMyCourses);    // Get all my enrolled courses
-
-// ── Shared Routes ──────────────────────────────────────
-router.get("/:course_id",                                 auth, getCourse);
+// General routes
+router.post('/', authMiddleware, createCourse);
+router.get('/:course_id', authMiddleware, getCourseById);
+router.put('/:course_id', authMiddleware, updateCourse);
+router.delete('/:course_id', authMiddleware, deleteCourse);
 
 module.exports = router;
