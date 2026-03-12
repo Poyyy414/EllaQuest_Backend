@@ -9,22 +9,23 @@ const {
     updateStudentStatus,
     getPendingStudents,
     joinSection
-
 } = require('../controllers/sectionController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
-// Section CRUD (nested under course)
+// ✅ Specific routes FIRST
+router.post('/join', authMiddleware, joinSection);
+
+// Section CRUD
 router.post('/', authMiddleware, createSection);
 router.get('/', authMiddleware, getSectionsByCourse);
-router.get('/:section_id', authMiddleware, getSectionById);
-router.put('/:section_id', authMiddleware, updateSection);
-router.delete('/:section_id', authMiddleware, deleteSection);
 
-// Student management
+// ✅ Specific nested routes BEFORE /:section_id
 router.get('/:section_id/pending', authMiddleware, getPendingStudents);
 router.put('/:section_id/students/:ss_id', authMiddleware, updateStudentStatus);
 
-//student join section
-router.post('/:section_id/join', authMiddleware, joinSection);
+// ✅ Dynamic routes LAST
+router.get('/:section_id', authMiddleware, getSectionById);
+router.put('/:section_id', authMiddleware, updateSection);
+router.delete('/:section_id', authMiddleware, deleteSection);
 
 module.exports = router;
