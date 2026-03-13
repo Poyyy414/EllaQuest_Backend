@@ -112,7 +112,7 @@ const getActivityWithQuestions = async (req, res) => {
         } else {
             // Student sees randomized questions
             // identification/fill_in_blank = empty answers
-            // multiple_choice/true_false = show answer choices without is_correct
+            // multiple_choice/true_false = show choices without is_correct
             query = await pool.query(
                 `SELECT aq.question_id, aq.question_text, aq.question_type,
                         aq.media_url, aq.order_index,
@@ -342,16 +342,85 @@ const deleteActivity = async (req, res) => {
     }
 };
 
-// ================= SUBMIT ACTIVITY (Student) =================
-const submitActivity = async (req, res) => {
-    const { activity_id } = req.params;
-    const { answers } = req.body;
-    // multiple_choice/true_false: { question_id, answer_id }
-    // identification/fill_in_blank: { question_id, answer_text }
+// ================= SUBMIT SINGLE ANSWER (Student) =================
+const submitAnswer = async (req, res) => {
+    const { activity_id, question_id } = req.params;
+    const { answer_id, answer_text } = req.body;
 
     try {
         if (req.user.role !== 'student') {
-            return res.status(403).json({ message: 'Only students can submit activities' });
+            return res.status(403).json({ message: 'Only students can submit answers' });
+        }
+
+        const student_id = await getStudentId(req.user.user_id);
+
+        // Check if already answered this question
+        const alreadyAnswered = await pool.query(
+            `SELECT * FROM student_activity_answer 
+             WHERE student_id = $1 AND question_id = $2 AND activity_id = $3`,
+            [student_id, question_id, activity_id]
+        );
+        if (alreadyAnswered.rows.length > 0) {
+            return res.status(400).json({ message: 'You already answered this question' });
+        }
+
+        // Get question type
+        const questionResult = await pool.query(
+            'SELECT * FROM activity_question WHERE question_id = $1 AND activity_id = $2',
+            [question_id, activity_id]
+        );
+        if (questionResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Question not found' });
+        }
+        const question = questionResult.rows[0];
+
+        // Get correct answer
+        const correctAnswer = await pool.query(
+            'SELECT * FROM activity_answer WHERE question_id = $1 AND is_correct = true',
+            [question_id]
+        );
+        if (correctAnswer.rows.length === 0) {
+            return res.status(404).json({ message: 'Correct answer not found' });
+        }
+
+        let isCorrect = false;
+
+        if (['identification', 'fill_in_blank'].includes(question.question_type)) {
+            // Compare text answer (case insensitive)
+            isCorrect = correctAnswer.rows[0].answer_text.toLowerCase().trim() ===
+                        answer_text?.toLowerCase().trim();
+        } else {
+            // Compare answer_id
+            isCorrect = correctAnswer.rows.some(a => a.answer_id === answer_id);
+        }
+
+        // Save student answer to DB
+        await pool.query(
+            `INSERT INTO student_activity_answer 
+             (student_id, activity_id, question_id, answer_id, answer_text, is_correct)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [student_id, activity_id, question_id, answer_id || null, answer_text || null, isCorrect]
+        );
+
+        res.json({
+            question_id: parseInt(question_id),
+            is_correct: isCorrect,
+            correct_answer: isCorrect ? null : correctAnswer.rows[0].answer_text,
+            message: isCorrect ? 'Correct! ✅' : 'Wrong! ❌'
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error submitting answer', error: error.message });
+    }
+};
+
+// ================= FINISH ACTIVITY (Student) =================
+const finishActivity = async (req, res) => {
+    const { activity_id } = req.params;
+
+    try {
+        if (req.user.role !== 'student') {
+            return res.status(403).json({ message: 'Only students can finish activities' });
         }
 
         const student_id = await getStudentId(req.user.user_id);
@@ -366,61 +435,26 @@ const submitActivity = async (req, res) => {
         }
         const activity = activityResult.rows[0];
 
-        // Score the answers
-        let score = 0;
-        const results = [];
+        // Count correct answers from student_activity_answer
+        const scoreResult = await pool.query(
+            `SELECT 
+                COUNT(*) as total_answered,
+                COUNT(CASE WHEN is_correct = true THEN 1 END) as correct_count
+             FROM student_activity_answer
+             WHERE student_id = $1 AND activity_id = $2`,
+            [student_id, activity_id]
+        );
 
-        for (const submitted of answers) {
-            // Get question type
-            const questionResult = await pool.query(
-                'SELECT * FROM activity_question WHERE question_id = $1',
-                [submitted.question_id]
-            );
-            const question = questionResult.rows[0];
-
-            let isCorrect = false;
-
-            if (['identification', 'fill_in_blank'].includes(question.question_type)) {
-                // Compare text answer (case insensitive)
-                const correctAnswer = await pool.query(
-                    `SELECT * FROM activity_answer 
-                     WHERE question_id = $1 AND is_correct = true`,
-                    [submitted.question_id]
-                );
-                if (correctAnswer.rows.length > 0) {
-                    isCorrect = correctAnswer.rows[0].answer_text.toLowerCase().trim() ===
-                                submitted.answer_text.toLowerCase().trim();
-                }
-            } else {
-                // Compare answer_id for multiple_choice and true_false
-                const correctAnswer = await pool.query(
-                    `SELECT * FROM activity_answer 
-                     WHERE question_id = $1 AND is_correct = true`,
-                    [submitted.question_id]
-                );
-                isCorrect = correctAnswer.rows.some(
-                    a => a.answer_id === submitted.answer_id
-                );
-            }
-
-            if (isCorrect) score++;
-
-            results.push({
-                question_id: submitted.question_id,
-                is_correct: isCorrect
-            });
-        }
-
-        const total_items = answers.length;
+        const score = parseInt(scoreResult.rows[0].correct_count);
+        const total_items = parseInt(scoreResult.rows[0].total_answered);
         const passing_score = activity.passing_score;
         const is_passed = score >= passing_score;
-        const percentage = ((score / total_items) * 100).toFixed(2);
+        const percentage = total_items > 0 ? ((score / total_items) * 100).toFixed(2) : '0.00';
 
-        // If passed — unlock quiz for this level
+        // If passed — unlock quiz
         if (is_passed) {
             await pool.query(
-                `UPDATE quiz SET is_locked = false
-                 WHERE quest_level_id = $1`,
+                `UPDATE quiz SET is_locked = false WHERE quest_level_id = $1`,
                 [activity.quest_level_id]
             );
 
@@ -440,18 +474,26 @@ const submitActivity = async (req, res) => {
             );
         }
 
+        // Clear student answers for retry if failed
+        if (!is_passed) {
+            await pool.query(
+                `DELETE FROM student_activity_answer 
+                 WHERE student_id = $1 AND activity_id = $2`,
+                [student_id, activity_id]
+            );
+        }
+
         res.json({
             message: is_passed ? 'Activity passed! Quiz is now unlocked 🎉' : 'Activity failed. Try again!',
             score,
             total_items,
             passing_score,
             percentage,
-            is_passed,
-            results
+            is_passed
         });
 
     } catch (error) {
-        res.status(500).json({ message: 'Error submitting activity', error: error.message });
+        res.status(500).json({ message: 'Error finishing activity', error: error.message });
     }
 };
 
@@ -464,5 +506,6 @@ module.exports = {
     deleteQuestion,
     updateActivity,
     deleteActivity,
-    submitActivity
+    submitAnswer,
+    finishActivity
 };
