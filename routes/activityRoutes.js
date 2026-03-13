@@ -4,6 +4,7 @@ const {
     createActivity,
     getActivityByLevel,
     getActivityWithQuestions,
+    getNextQuestion,
     addQuestion,
     updateQuestion,
     deleteQuestion,
@@ -14,23 +15,22 @@ const {
 } = require('../controllers/activityController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
-// Question management (CM)
+// CM question management
 router.put('/questions/:question_id', authMiddleware, updateQuestion);
 router.delete('/questions/:question_id', authMiddleware, deleteQuestion);
 
-// Activity CRUD (CM)
+// Activity CRUD
 router.post('/', authMiddleware, createActivity);
 router.get('/', authMiddleware, getActivityByLevel);
 
-// Specific routes FIRST before /:activity_id
+// Specific routes BEFORE /:activity_id
 router.post('/:activity_id/questions', authMiddleware, addQuestion);
-router.get('/:activity_id/questions', authMiddleware, getActivityWithQuestions);
+router.get('/:activity_id/questions', authMiddleware, getActivityWithQuestions);  // CM only
+router.get('/:activity_id/next-question', authMiddleware, getNextQuestion);        // Student
+router.post('/:activity_id/questions/:question_id/answer', authMiddleware, submitAnswer); // Student
+router.post('/:activity_id/finish', authMiddleware, finishActivity);               // Student
 
-// Student routes
-router.post('/:activity_id/questions/:question_id/answer', authMiddleware, submitAnswer);
-router.post('/:activity_id/finish', authMiddleware, finishActivity);
-
-// General activity routes
+// General
 router.put('/:activity_id', authMiddleware, updateActivity);
 router.delete('/:activity_id', authMiddleware, deleteActivity);
 

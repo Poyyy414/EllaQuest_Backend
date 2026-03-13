@@ -20,7 +20,6 @@ const createActivity = async (req, res) => {
             return res.status(403).json({ message: 'Only curriculum managers can create activities' });
         }
 
-        // Check if activity already exists for this level
         const existing = await pool.query(
             'SELECT * FROM activity WHERE quest_level_id = $1',
             [quest_level_id]
@@ -71,49 +70,128 @@ const getActivityByLevel = async (req, res) => {
     }
 };
 
-// ================= GET ACTIVITY WITH QUESTIONS =================
+// ================= GET ALL QUESTIONS (CM only) =================
 const getActivityWithQuestions = async (req, res) => {
     const { activity_id } = req.params;
 
     try {
+        if (req.user.role !== 'curriculum_manager') {
+            return res.status(403).json({ message: 'Only curriculum managers can view all questions' });
+        }
+
         const activityResult = await pool.query(
             'SELECT * FROM activity WHERE activity_id = $1',
             [activity_id]
         );
-
         if (activityResult.rows.length === 0) {
             return res.status(404).json({ message: 'Activity not found' });
         }
 
-        const isCM = req.user.role === 'curriculum_manager';
+        // CM sees all questions with is_correct
+        const questions = await pool.query(
+            `SELECT aq.question_id, aq.question_text, aq.question_type,
+                    aq.media_url, aq.order_index,
+                    json_agg(
+                        json_build_object(
+                            'answer_id', aa.answer_id,
+                            'answer_text', aa.answer_text,
+                            'is_correct', aa.is_correct,
+                            'order_index', aa.order_index
+                        ) ORDER BY aa.order_index
+                    ) as answers
+             FROM activity_question aq
+             LEFT JOIN activity_answer aa ON aq.question_id = aa.question_id
+             WHERE aq.activity_id = $1
+             GROUP BY aq.question_id
+             ORDER BY aq.order_index`,
+            [activity_id]
+        );
 
-        let query;
+        res.json({
+            activity: activityResult.rows[0],
+            questions: questions.rows
+        });
 
-        if (isCM) {
-            // CM sees is_correct + answers for all types + ordered
-            query = await pool.query(
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching activity questions', error: error.message });
+    }
+};
+
+// ================= GET NEXT QUESTION (Student) =================
+const getNextQuestion = async (req, res) => {
+    const { activity_id } = req.params;
+
+    try {
+        if (req.user.role !== 'student') {
+            return res.status(403).json({ message: 'Only students can take activities' });
+        }
+
+        const student_id = await getStudentId(req.user.user_id);
+
+        // Check activity exists
+        const activityResult = await pool.query(
+            'SELECT * FROM activity WHERE activity_id = $1',
+            [activity_id]
+        );
+        if (activityResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Activity not found' });
+        }
+
+        // Get total questions
+        const totalResult = await pool.query(
+            'SELECT COUNT(*) as total FROM activity_question WHERE activity_id = $1',
+            [activity_id]
+        );
+        const total_questions = parseInt(totalResult.rows[0].total);
+
+        // Get already answered question IDs
+        const answeredResult = await pool.query(
+            `SELECT question_id FROM student_activity_answer
+             WHERE student_id = $1 AND activity_id = $2`,
+            [student_id, activity_id]
+        );
+        const answeredIds = answeredResult.rows.map(r => r.question_id);
+        const answered_count = answeredIds.length;
+
+        // If all questions answered
+        if (answered_count >= total_questions || answered_count >= 10) {
+            return res.json({
+                message: 'All questions answered! Click finish to see your score.',
+                completed: true,
+                answered_count,
+                total_questions: Math.min(total_questions, 10)
+            });
+        }
+
+        // Get next unanswered question (randomized from unanswered pool)
+        let nextQuestion;
+
+        if (answeredIds.length > 0) {
+            nextQuestion = await pool.query(
                 `SELECT aq.question_id, aq.question_text, aq.question_type,
                         aq.media_url, aq.order_index,
-                        json_agg(
-                            json_build_object(
-                                'answer_id', aa.answer_id,
-                                'answer_text', aa.answer_text,
-                                'is_correct', aa.is_correct,
-                                'order_index', aa.order_index
-                            ) ORDER BY aa.order_index
-                        ) as answers
+                        CASE 
+                            WHEN aq.question_type IN ('identification', 'fill_in_blank') 
+                            THEN '[]'::json
+                            ELSE json_agg(
+                                json_build_object(
+                                    'answer_id', aa.answer_id,
+                                    'answer_text', aa.answer_text,
+                                    'order_index', aa.order_index
+                                ) ORDER BY RANDOM()
+                            )
+                        END as answers
                  FROM activity_question aq
                  LEFT JOIN activity_answer aa ON aq.question_id = aa.question_id
                  WHERE aq.activity_id = $1
+                 AND aq.question_id NOT IN (${answeredIds.join(',')})
                  GROUP BY aq.question_id
-                 ORDER BY aq.order_index`,
+                 ORDER BY RANDOM()
+                 LIMIT 1`,
                 [activity_id]
             );
         } else {
-            // Student sees randomized questions
-            // identification/fill_in_blank = empty answers
-            // multiple_choice/true_false = show choices without is_correct
-            query = await pool.query(
+            nextQuestion = await pool.query(
                 `SELECT aq.question_id, aq.question_text, aq.question_type,
                         aq.media_url, aq.order_index,
                         CASE 
@@ -132,18 +210,29 @@ const getActivityWithQuestions = async (req, res) => {
                  WHERE aq.activity_id = $1
                  GROUP BY aq.question_id
                  ORDER BY RANDOM()
-                 LIMIT 10`,
+                 LIMIT 1`,
                 [activity_id]
             );
         }
 
+        if (nextQuestion.rows.length === 0) {
+            return res.json({
+                message: 'All questions answered! Click finish to see your score.',
+                completed: true,
+                answered_count,
+                total_questions: Math.min(total_questions, 10)
+            });
+        }
+
         res.json({
-            activity: activityResult.rows[0],
-            questions: query.rows
+            question: nextQuestion.rows[0],
+            answered_count,
+            total_questions: Math.min(total_questions, 10),
+            completed: false
         });
 
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching activity questions', error: error.message });
+        res.status(500).json({ message: 'Error getting next question', error: error.message });
     }
 };
 
@@ -161,7 +250,6 @@ const addQuestion = async (req, res) => {
             return res.status(400).json({ message: 'question_text and question_type are required' });
         }
 
-        // Validate question_type
         const validTypes = ['multiple_choice', 'true_false', 'identification', 'fill_in_blank'];
         if (!validTypes.includes(question_type)) {
             return res.status(400).json({
@@ -169,7 +257,6 @@ const addQuestion = async (req, res) => {
             });
         }
 
-        // identification and fill_in_blank only need 1 answer
         const minAnswers = ['identification', 'fill_in_blank'].includes(question_type) ? 1 : 2;
         if (!answers || answers.length < minAnswers) {
             return res.status(400).json({
@@ -182,7 +269,6 @@ const addQuestion = async (req, res) => {
             return res.status(400).json({ message: 'At least one answer must be correct' });
         }
 
-        // Check activity exists
         const activityCheck = await pool.query(
             'SELECT * FROM activity WHERE activity_id = $1',
             [activity_id]
@@ -191,7 +277,6 @@ const addQuestion = async (req, res) => {
             return res.status(404).json({ message: 'Activity not found' });
         }
 
-        // Insert question
         const questionResult = await pool.query(
             `INSERT INTO activity_question (activity_id, question_text, question_type, media_url, order_index)
              VALUES ($1, $2, $3, $4, $5)
@@ -200,7 +285,6 @@ const addQuestion = async (req, res) => {
         );
         const question_id = questionResult.rows[0].question_id;
 
-        // Insert answers
         const insertedAnswers = [];
         for (const answer of answers) {
             const answerResult = await pool.query(
@@ -248,10 +332,7 @@ const updateQuestion = async (req, res) => {
             return res.status(404).json({ message: 'Question not found' });
         }
 
-        res.json({
-            message: 'Question updated successfully',
-            question: result.rows[0]
-        });
+        res.json({ message: 'Question updated successfully', question: result.rows[0] });
 
     } catch (error) {
         res.status(500).json({ message: 'Error updating question', error: error.message });
@@ -307,10 +388,7 @@ const updateActivity = async (req, res) => {
             return res.status(404).json({ message: 'Activity not found' });
         }
 
-        res.json({
-            message: 'Activity updated successfully',
-            activity: result.rows[0]
-        });
+        res.json({ message: 'Activity updated successfully', activity: result.rows[0] });
 
     } catch (error) {
         res.status(500).json({ message: 'Error updating activity', error: error.message });
@@ -354,7 +432,7 @@ const submitAnswer = async (req, res) => {
 
         const student_id = await getStudentId(req.user.user_id);
 
-        // Check if already answered this question
+        // Check if already answered
         const alreadyAnswered = await pool.query(
             `SELECT * FROM student_activity_answer 
              WHERE student_id = $1 AND question_id = $2 AND activity_id = $3`,
@@ -364,7 +442,7 @@ const submitAnswer = async (req, res) => {
             return res.status(400).json({ message: 'You already answered this question' });
         }
 
-        // Get question type
+        // Get question
         const questionResult = await pool.query(
             'SELECT * FROM activity_question WHERE question_id = $1 AND activity_id = $2',
             [question_id, activity_id]
@@ -386,15 +464,13 @@ const submitAnswer = async (req, res) => {
         let isCorrect = false;
 
         if (['identification', 'fill_in_blank'].includes(question.question_type)) {
-            // Compare text answer (case insensitive)
             isCorrect = correctAnswer.rows[0].answer_text.toLowerCase().trim() ===
                         answer_text?.toLowerCase().trim();
         } else {
-            // Compare answer_id
             isCorrect = correctAnswer.rows.some(a => a.answer_id === answer_id);
         }
 
-        // Save student answer to DB
+        // Save to DB
         await pool.query(
             `INSERT INTO student_activity_answer 
              (student_id, activity_id, question_id, answer_id, answer_text, is_correct)
@@ -402,11 +478,29 @@ const submitAnswer = async (req, res) => {
             [student_id, activity_id, question_id, answer_id || null, answer_text || null, isCorrect]
         );
 
+        // Check how many answered so far
+        const answeredResult = await pool.query(
+            `SELECT COUNT(*) as total FROM student_activity_answer
+             WHERE student_id = $1 AND activity_id = $2`,
+            [student_id, activity_id]
+        );
+        const answered_count = parseInt(answeredResult.rows[0].total);
+
+        // Get total questions (max 10)
+        const totalResult = await pool.query(
+            'SELECT COUNT(*) as total FROM activity_question WHERE activity_id = $1',
+            [activity_id]
+        );
+        const total_questions = Math.min(parseInt(totalResult.rows[0].total), 10);
+
         res.json({
             question_id: parseInt(question_id),
             is_correct: isCorrect,
             correct_answer: isCorrect ? null : correctAnswer.rows[0].answer_text,
-            message: isCorrect ? 'Correct! ✅' : 'Wrong! ❌'
+            message: isCorrect ? 'Correct! ✅' : 'Wrong! ❌',
+            answered_count,
+            total_questions,
+            all_answered: answered_count >= total_questions
         });
 
     } catch (error) {
@@ -435,7 +529,7 @@ const finishActivity = async (req, res) => {
         }
         const activity = activityResult.rows[0];
 
-        // Count correct answers from student_activity_answer
+        // Count score
         const scoreResult = await pool.query(
             `SELECT 
                 COUNT(*) as total_answered,
@@ -451,8 +545,8 @@ const finishActivity = async (req, res) => {
         const is_passed = score >= passing_score;
         const percentage = total_items > 0 ? ((score / total_items) * 100).toFixed(2) : '0.00';
 
-        // If passed — unlock quiz
         if (is_passed) {
+            // Unlock quiz
             await pool.query(
                 `UPDATE quiz SET is_locked = false WHERE quest_level_id = $1`,
                 [activity.quest_level_id]
@@ -472,10 +566,8 @@ const finishActivity = async (req, res) => {
                     updated_at = NOW()`,
                 [student_id, activity.quest_level_id]
             );
-        }
-
-        // Clear student answers for retry if failed
-        if (!is_passed) {
+        } else {
+            // Clear answers so student can retry
             await pool.query(
                 `DELETE FROM student_activity_answer 
                  WHERE student_id = $1 AND activity_id = $2`,
@@ -501,6 +593,7 @@ module.exports = {
     createActivity,
     getActivityByLevel,
     getActivityWithQuestions,
+    getNextQuestion,
     addQuestion,
     updateQuestion,
     deleteQuestion,
