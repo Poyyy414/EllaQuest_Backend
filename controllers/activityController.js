@@ -467,7 +467,7 @@ const submitAnswer = async (req, res) => {
             isCorrect = correctAnswer.rows[0].answer_text.toLowerCase().trim() ===
                         answer_text?.toLowerCase().trim();
         } else {
-            isCorrect = correctAnswer.rows.some(a => a.answer_id === answer_id);
+            isCorrect = correctAnswer.rows.some(a => a.answer_id === parseInt(answer_id));
         }
 
         // Save to DB
