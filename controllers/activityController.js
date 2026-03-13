@@ -1,15 +1,5 @@
 const pool = require('../config/database');
 
-// ================= HELPER: GET CM ID =================
-const getCmId = async (user_id) => {
-    const result = await pool.query(
-        'SELECT cm_id FROM curriculum_manager WHERE user_id = $1',
-        [user_id]
-    );
-    if (result.rows.length === 0) throw new Error('Curriculum manager not found');
-    return result.rows[0].cm_id;
-};
-
 // ================= HELPER: GET STUDENT ID =================
 const getStudentId = async (user_id) => {
     const result = await pool.query(
@@ -23,15 +13,11 @@ const getStudentId = async (user_id) => {
 // ================= CREATE ACTIVITY =================
 const createActivity = async (req, res) => {
     const { quest_level_id } = req.params;
-    const { title, difficulty, game_type, passing_score } = req.body;
+    const { title, difficulty, passing_score } = req.body;
 
     try {
         if (req.user.role !== 'curriculum_manager') {
             return res.status(403).json({ message: 'Only curriculum managers can create activities' });
-        }
-
-        if (!game_type) {
-            return res.status(400).json({ message: 'game_type is required' });
         }
 
         // Check if activity already exists for this level
@@ -45,9 +31,9 @@ const createActivity = async (req, res) => {
 
         const result = await pool.query(
             `INSERT INTO activity (quest_level_id, title, difficulty, game_type, passing_score, is_passed)
-             VALUES ($1, $2, $3, $4, $5, false)
+             VALUES ($1, $2, $3, 'mixed', $4, false)
              RETURNING *`,
-            [quest_level_id, title, difficulty, game_type, passing_score || 7]
+            [quest_level_id, title, difficulty, passing_score || 7]
         );
 
         res.status(201).json({
@@ -99,9 +85,10 @@ const getActivityWithQuestions = async (req, res) => {
             return res.status(404).json({ message: 'Activity not found' });
         }
 
-        // Get questions with answers (randomized)
+        // Get 10 randomized questions with answers
         const questions = await pool.query(
-            `SELECT aq.question_id, aq.question_text, aq.question_type, aq.media_url, aq.order_index,
+            `SELECT aq.question_id, aq.question_text, aq.question_type, 
+                    aq.media_url, aq.order_index,
                     json_agg(
                         json_build_object(
                             'answer_id', aa.answer_id,
@@ -140,6 +127,14 @@ const addQuestion = async (req, res) => {
 
         if (!question_text || !question_type) {
             return res.status(400).json({ message: 'question_text and question_type are required' });
+        }
+
+        // Validate question_type
+        const validTypes = ['multiple_choice', 'true_false', 'identification', 'fill_in_blank'];
+        if (!validTypes.includes(question_type)) {
+            return res.status(400).json({ 
+                message: 'question_type must be multiple_choice, true_false, identification, or fill_in_blank' 
+            });
         }
 
         if (!answers || answers.length < 2) {
@@ -255,7 +250,7 @@ const deleteQuestion = async (req, res) => {
 // ================= UPDATE ACTIVITY =================
 const updateActivity = async (req, res) => {
     const { activity_id } = req.params;
-    const { title, difficulty, game_type, passing_score } = req.body;
+    const { title, difficulty, passing_score } = req.body;
 
     try {
         if (req.user.role !== 'curriculum_manager') {
@@ -266,11 +261,10 @@ const updateActivity = async (req, res) => {
             `UPDATE activity SET
                 title = COALESCE($1, title),
                 difficulty = COALESCE($2, difficulty),
-                game_type = COALESCE($3, game_type),
-                passing_score = COALESCE($4, passing_score)
-             WHERE activity_id = $5
+                passing_score = COALESCE($3, passing_score)
+             WHERE activity_id = $4
              RETURNING *`,
-            [title, difficulty, game_type, passing_score, activity_id]
+            [title, difficulty, passing_score, activity_id]
         );
 
         if (result.rows.length === 0) {
