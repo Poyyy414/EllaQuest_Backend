@@ -87,7 +87,7 @@ const getActivityWithQuestions = async (req, res) => {
 
         // Get 10 randomized questions with answers
         const questions = await pool.query(
-            `SELECT aq.question_id, aq.question_text, aq.question_type, 
+            `SELECT aq.question_id, aq.question_text, aq.question_type,
                     aq.media_url, aq.order_index,
                     json_agg(
                         json_build_object(
@@ -132,13 +132,17 @@ const addQuestion = async (req, res) => {
         // Validate question_type
         const validTypes = ['multiple_choice', 'true_false', 'identification', 'fill_in_blank'];
         if (!validTypes.includes(question_type)) {
-            return res.status(400).json({ 
-                message: 'question_type must be multiple_choice, true_false, identification, or fill_in_blank' 
+            return res.status(400).json({
+                message: 'question_type must be multiple_choice, true_false, identification, or fill_in_blank'
             });
         }
 
-        if (!answers || answers.length < 2) {
-            return res.status(400).json({ message: 'At least 2 answers are required' });
+        // identification and fill_in_blank only need 1 answer
+        const minAnswers = ['identification', 'fill_in_blank'].includes(question_type) ? 1 : 2;
+        if (!answers || answers.length < minAnswers) {
+            return res.status(400).json({
+                message: `At least ${minAnswers} answer(s) required for ${question_type}`
+            });
         }
 
         const hasCorrectAnswer = answers.some(a => a.is_correct === true);
@@ -310,7 +314,8 @@ const deleteActivity = async (req, res) => {
 const submitActivity = async (req, res) => {
     const { activity_id } = req.params;
     const { answers } = req.body;
-    // answers = [{ question_id: 1, answer_id: 2 }, ...]
+    // multiple_choice/true_false: { question_id, answer_id }
+    // identification/fill_in_blank: { question_id, answer_text }
 
     try {
         if (req.user.role !== 'student') {
@@ -334,21 +339,42 @@ const submitActivity = async (req, res) => {
         const results = [];
 
         for (const submitted of answers) {
-            const correctAnswer = await pool.query(
-                `SELECT * FROM activity_answer 
-                 WHERE question_id = $1 AND is_correct = true`,
+            // Get question type
+            const questionResult = await pool.query(
+                'SELECT * FROM activity_question WHERE question_id = $1',
                 [submitted.question_id]
             );
+            const question = questionResult.rows[0];
 
-            const isCorrect = correctAnswer.rows.some(
-                a => a.answer_id === submitted.answer_id
-            );
+            let isCorrect = false;
+
+            if (['identification', 'fill_in_blank'].includes(question.question_type)) {
+                // Compare text answer (case insensitive)
+                const correctAnswer = await pool.query(
+                    `SELECT * FROM activity_answer 
+                     WHERE question_id = $1 AND is_correct = true`,
+                    [submitted.question_id]
+                );
+                if (correctAnswer.rows.length > 0) {
+                    isCorrect = correctAnswer.rows[0].answer_text.toLowerCase().trim() ===
+                                submitted.answer_text.toLowerCase().trim();
+                }
+            } else {
+                // Compare answer_id for multiple_choice and true_false
+                const correctAnswer = await pool.query(
+                    `SELECT * FROM activity_answer 
+                     WHERE question_id = $1 AND is_correct = true`,
+                    [submitted.question_id]
+                );
+                isCorrect = correctAnswer.rows.some(
+                    a => a.answer_id === submitted.answer_id
+                );
+            }
 
             if (isCorrect) score++;
 
             results.push({
                 question_id: submitted.question_id,
-                answer_id: submitted.answer_id,
                 is_correct: isCorrect
             });
         }
