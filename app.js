@@ -11,6 +11,7 @@ const studentRoutes = require('./routes/studentRoutes');
 const questRoutes = require('./routes/questRoutes');
 const sectionRoutes = require('./routes/sectionRoutes');
 const questLevelRoutes = require('./routes/questLevelRoutes');
+const activityRoutes = require('./routes/activityRoutes');
 
 const app = express();
 app.use(cors());
@@ -30,6 +31,7 @@ app.use('/api/student', studentRoutes);
 app.use('/api/quests', questRoutes);
 app.use('/api/courses/:course_id/sections', sectionRoutes);
 app.use('/api/quests/:quest_id/levels', questLevelRoutes);
+app.use('/api/quests/:quest_id/levels/:quest_level_id/activities', activityRoutes);
 
 const PORT = process.env.PORT || 5000;
 
