@@ -10,6 +10,7 @@ const instructorRoutes = require('./routes/instructorRoutes');
 const studentRoutes = require('./routes/studentRoutes');
 const questRoutes = require('./routes/questRoutes');
 const sectionRoutes = require('./routes/sectionRoutes');
+const questLevelRoutes = require('./routes/questLevelRoutes');
 
 const app = express();
 app.use(cors());
@@ -28,6 +29,7 @@ app.use('/api/instructor', instructorRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/quests', questRoutes);
 app.use('/api/courses/:course_id/sections', sectionRoutes);
+app.use('/api/quest-levels', questLevelRoutes);
 
 const PORT = process.env.PORT || 5000;
 
