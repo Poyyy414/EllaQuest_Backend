@@ -1,30 +1,25 @@
 const express = require('express');
 const router = express.Router();
-const { 
+const {
     createQuest,
     getAllQuests,
     getQuestById,
-    getQuestsByMacroSkill,
+    getQuestsByType,
     updateQuest,
     togglePublishQuest,
-    deleteQuest,
-    getMacroSkills,
-    createMacroSkill
+    deleteQuest
 } = require('../controllers/questController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
-// ================= MACRO SKILLS =================
-// ⚠️ Specific routes MUST come before dynamic /:quest_id routes
-router.get('/macro-skills', authMiddleware, getMacroSkills);
-router.post('/macro-skills', authMiddleware, createMacroSkill);
-router.get('/macro-skill/:macro_skill_id', authMiddleware, getQuestsByMacroSkill);
+// Specific routes FIRST
+router.get('/type/:quest_type', authMiddleware, getQuestsByType);
+router.put('/:quest_id/publish', authMiddleware, togglePublishQuest);
 
-// ================= QUESTS =================
+// General routes
 router.post('/', authMiddleware, createQuest);
 router.get('/', authMiddleware, getAllQuests);
-router.get('/:quest_id', authMiddleware, getQuestById);        // ✅ dynamic route LAST
+router.get('/:quest_id', authMiddleware, getQuestById);
 router.put('/:quest_id', authMiddleware, updateQuest);
-router.patch('/:quest_id/publish', authMiddleware, togglePublishQuest);
 router.delete('/:quest_id', authMiddleware, deleteQuest);
 
 module.exports = router;
