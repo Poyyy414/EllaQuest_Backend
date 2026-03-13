@@ -29,7 +29,7 @@ app.use('/api/instructor', instructorRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/quests', questRoutes);
 app.use('/api/courses/:course_id/sections', sectionRoutes);
-app.use('/api/quest-levels', questLevelRoutes);
+app.use('/api/quests/:quest_id/levels', questLevelRoutes);
 
 const PORT = process.env.PORT || 5000;
 
