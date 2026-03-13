@@ -85,29 +85,61 @@ const getActivityWithQuestions = async (req, res) => {
             return res.status(404).json({ message: 'Activity not found' });
         }
 
-        // Get 10 randomized questions with answers
-        const questions = await pool.query(
-            `SELECT aq.question_id, aq.question_text, aq.question_type,
-                    aq.media_url, aq.order_index,
-                    json_agg(
-                        json_build_object(
-                            'answer_id', aa.answer_id,
-                            'answer_text', aa.answer_text,
-                            'order_index', aa.order_index
-                        ) ORDER BY RANDOM()
-                    ) as answers
-             FROM activity_question aq
-             LEFT JOIN activity_answer aa ON aq.question_id = aa.question_id
-             WHERE aq.activity_id = $1
-             GROUP BY aq.question_id
-             ORDER BY RANDOM()
-             LIMIT 10`,
-            [activity_id]
-        );
+        const isCM = req.user.role === 'curriculum_manager';
+
+        let query;
+
+        if (isCM) {
+            // CM sees is_correct + answers for all types + ordered
+            query = await pool.query(
+                `SELECT aq.question_id, aq.question_text, aq.question_type,
+                        aq.media_url, aq.order_index,
+                        json_agg(
+                            json_build_object(
+                                'answer_id', aa.answer_id,
+                                'answer_text', aa.answer_text,
+                                'is_correct', aa.is_correct,
+                                'order_index', aa.order_index
+                            ) ORDER BY aa.order_index
+                        ) as answers
+                 FROM activity_question aq
+                 LEFT JOIN activity_answer aa ON aq.question_id = aa.question_id
+                 WHERE aq.activity_id = $1
+                 GROUP BY aq.question_id
+                 ORDER BY aq.order_index`,
+                [activity_id]
+            );
+        } else {
+            // Student sees randomized questions
+            // identification/fill_in_blank = empty answers
+            // multiple_choice/true_false = show answer choices without is_correct
+            query = await pool.query(
+                `SELECT aq.question_id, aq.question_text, aq.question_type,
+                        aq.media_url, aq.order_index,
+                        CASE 
+                            WHEN aq.question_type IN ('identification', 'fill_in_blank') 
+                            THEN '[]'::json
+                            ELSE json_agg(
+                                json_build_object(
+                                    'answer_id', aa.answer_id,
+                                    'answer_text', aa.answer_text,
+                                    'order_index', aa.order_index
+                                ) ORDER BY RANDOM()
+                            )
+                        END as answers
+                 FROM activity_question aq
+                 LEFT JOIN activity_answer aa ON aq.question_id = aa.question_id
+                 WHERE aq.activity_id = $1
+                 GROUP BY aq.question_id
+                 ORDER BY RANDOM()
+                 LIMIT 10`,
+                [activity_id]
+            );
+        }
 
         res.json({
             activity: activityResult.rows[0],
-            questions: questions.rows
+            questions: query.rows
         });
 
     } catch (error) {
