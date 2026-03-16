@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 // ================= BREVO HTTP API =================
-const sendEmail = async (to, code, attempts) => {
+const sendEmail = async (to, code, attemptsLeft) => {
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
@@ -22,8 +22,8 @@ const sendEmail = async (to, code, attempts) => {
                     <h2 style="color: #2c3e50;">NCF Verification Code</h2>
                     <p>Your verification code is:</p>
                     <h1 style="letter-spacing: 8px; color: #e74c3c;">${code}</h1>
-                    <p>This code expires in <strong>10 minutes</strong>.</p>
-                    <p>You have <strong>${3 - attempts}</strong> resend attempt(s) remaining.</p>
+                    <p>This code expires in <strong>30 minutes</strong>.</p>
+                    <p>You have <strong>${attemptsLeft}</strong> resend attempt(s) remaining today.</p>
                     <p style="color: #999; font-size: 12px;">If you did not request this, please ignore this email.</p>
                 </div>
             `
@@ -31,7 +31,7 @@ const sendEmail = async (to, code, attempts) => {
     });
 
     const data = await response.json();
-    console.log('Brevo response:', JSON.stringify(data)); // ✅ debug log
+    console.log('Brevo response:', JSON.stringify(data));
 
     if (!response.ok) {
         throw new Error(data.message || 'Failed to send email');
@@ -40,11 +40,21 @@ const sendEmail = async (to, code, attempts) => {
     return data;
 };
 
+// ================= HELPER: IS SAME DAY =================
+const isSameDay = (date1, date2) => {
+    const d1 = new Date(date1);
+    const d2 = new Date(date2);
+    return (
+        d1.getFullYear() === d2.getFullYear() &&
+        d1.getMonth() === d2.getMonth() &&
+        d1.getDate() === d2.getDate()
+    );
+};
+
 // ================= SEND VERIFICATION CODE =================
 const sendVerificationCode = async (req, res) => {
     const { email } = req.body;
 
-    // ✅ Debug: log env vars on every request
     console.log('BREVO_API_KEY:', process.env.BREVO_API_KEY ? 'LOADED ✅' : 'MISSING ❌');
     console.log('BREVO_SENDER_EMAIL:', process.env.BREVO_SENDER_EMAIL ? 'LOADED ✅' : 'MISSING ❌');
 
@@ -65,46 +75,65 @@ const sendVerificationCode = async (req, res) => {
             [email]
         );
 
+        let attempts = 0;
+
         if (existing.rows.length > 0) {
             const record = existing.rows[0];
+            const today = new Date();
+            const isToday = isSameDay(record.created_at, today);
 
-            // Check max resend attempts (3 max)
-            if (record.attempts >= 3) {
-                return res.status(429).json({ 
-                    message: 'Maximum resend attempts reached. Please try again later.' 
-                });
-            }
+            if (isToday) {
+                // Same day — enforce max 5 attempts per day
+                if (record.attempts >= 5) {
+                    return res.status(429).json({ 
+                        message: 'Maximum 5 attempts reached for today. Please try again tomorrow.',
+                        attemptsLeft: 0
+                    });
+                }
 
-            // Check resend cooldown (1 minute)
-            if (record.resend_at && new Date() < new Date(record.resend_at)) {
-                const secondsLeft = Math.ceil((new Date(record.resend_at) - new Date()) / 1000);
-                return res.status(429).json({ 
-                    message: `Please wait ${secondsLeft} seconds before requesting a new code.`,
-                    secondsLeft
-                });
+                // Check 3 minute cooldown
+                if (record.resend_at && new Date() < new Date(record.resend_at)) {
+                    const secondsLeft = Math.ceil((new Date(record.resend_at) - new Date()) / 1000);
+                    const minutesLeft = Math.ceil(secondsLeft / 60);
+                    return res.status(429).json({ 
+                        message: `Please wait ${minutesLeft} minute(s) before requesting a new code.`,
+                        secondsLeft
+                    });
+                }
+
+                // Carry over today's attempt count
+                attempts = record.attempts;
+
+            } else {
+                // Different day — reset (new day, fresh 5 attempts)
+                attempts = 0;
             }
         }
 
-        // Generate 6-digit code
+        // Generate 6-digit OTP
         const code = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiry = new Date(Date.now() + 10 * 60 * 1000);   // 10 minutes
-        const resend_at = new Date(Date.now() + 1 * 60 * 1000); // 1 minute cooldown
-        const attempts = (existing.rows[0]?.attempts || 0) + 1;
+        const expiry    = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+        const resend_at = new Date(Date.now() +  3 * 60 * 1000); // 3 minute cooldown
+        const newAttempts = attempts + 1;
+        const attemptsLeft = 5 - newAttempts;
 
-        // Delete old and insert new
+        // Delete old record and insert fresh one
         await pool.query('DELETE FROM email_verification WHERE email = $1', [email]);
         await pool.query(
-            'INSERT INTO email_verification (email, code, expiry, resend_at, attempts, verified) VALUES ($1, $2, $3, $4, $5, false)',
-            [email, code, expiry, resend_at, attempts]
+            `INSERT INTO email_verification 
+             (email, code, expiry, resend_at, attempts, verified, created_at) 
+             VALUES ($1, $2, $3, $4, $5, false, NOW())`,
+            [email, code, expiry, resend_at, newAttempts]
         );
 
         // Send via Brevo HTTP API
-        await sendEmail(email, code, attempts);
+        await sendEmail(email, code, attemptsLeft);
 
         res.json({ 
             message: 'Verification code sent! Check your email.',
-            attemptsLeft: 3 - attempts,
-            resendIn: 60
+            attemptsLeft,
+            resendIn: 180,   // 3 minutes in seconds
+            expiresIn: 1800  // 30 minutes in seconds
         });
 
     } catch (error) {
@@ -112,7 +141,7 @@ const sendVerificationCode = async (req, res) => {
     }
 };
 
-// ================= REGISTER (with inline code verification) =================
+// ================= REGISTER =================
 const register = async (req, res) => {
     const { first_name, last_name, email, password, code } = req.body;
 
@@ -130,6 +159,7 @@ const register = async (req, res) => {
 
         const record = verifyResult.rows[0];
 
+        // Check expiry (30 minutes)
         if (new Date() > new Date(record.expiry)) {
             return res.status(400).json({ 
                 message: 'Code has expired. Please request a new one.',
@@ -137,6 +167,7 @@ const register = async (req, res) => {
             });
         }
 
+        // Check code match
         if (record.code !== code) {
             return res.status(400).json({ 
                 message: 'Invalid verification code. Please try again.',
@@ -144,6 +175,7 @@ const register = async (req, res) => {
             });
         }
 
+        // Determine role from email
         const studentEmailRegex = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
         const instructorEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
 
@@ -157,7 +189,9 @@ const register = async (req, res) => {
         const roleResult = await pool.query(
             'SELECT role_id FROM roles WHERE role_name = $1', [role]
         );
-        if (roleResult.rows.length === 0) return res.status(400).json({ message: 'Role not found' });
+        if (roleResult.rows.length === 0) {
+            return res.status(400).json({ message: 'Role not found' });
+        }
         const role_id = roleResult.rows[0].role_id;
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -174,6 +208,7 @@ const register = async (req, res) => {
             await pool.query('INSERT INTO instructor (user_id) VALUES ($1)', [user_id]);
         }
 
+        // Clean up verification record after successful registration
         await pool.query('DELETE FROM email_verification WHERE email = $1', [email]);
 
         res.status(201).json({ message: `User registered successfully as ${role}` });
@@ -183,7 +218,7 @@ const register = async (req, res) => {
     }
 };
 
-// ================= CREATE ACCOUNT (Admin/Curriculum Manager) =================
+// ================= CREATE ACCOUNT (Admin only — for CM and Admin accounts) =================
 const createAccount = async (req, res) => {
     const { first_name, last_name, email, password, role } = req.body;
 
@@ -197,8 +232,12 @@ const createAccount = async (req, res) => {
             return res.status(400).json({ message: 'Staff must use @ncf.edu.ph email' });
         }
 
-        const roleResult = await pool.query('SELECT role_id FROM roles WHERE role_name = $1', [role]);
-        if (roleResult.rows.length === 0) return res.status(400).json({ message: 'Role not found' });
+        const roleResult = await pool.query(
+            'SELECT role_id FROM roles WHERE role_name = $1', [role]
+        );
+        if (roleResult.rows.length === 0) {
+            return res.status(400).json({ message: 'Role not found' });
+        }
         const role_id = roleResult.rows[0].role_id;
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -210,7 +249,10 @@ const createAccount = async (req, res) => {
         const user_id = userResult.rows[0].user_id;
 
         if (role === 'admin') {
-            await pool.query('INSERT INTO admin (user_id) VALUES ($1)', [user_id]);
+            await pool.query(
+                'INSERT INTO admin (user_id, access_level) VALUES ($1, $2)', 
+                [user_id, 'full']
+            );
         } else if (role === 'curriculum_manager') {
             await pool.query('INSERT INTO curriculum_manager (user_id) VALUES ($1)', [user_id]);
         }
@@ -235,11 +277,15 @@ const login = async (req, res) => {
             [email]
         );
 
-        if (result.rows.length === 0) return res.status(400).json({ message: 'Invalid Credentials' });
+        if (result.rows.length === 0) {
+            return res.status(400).json({ message: 'Invalid Credentials' });
+        }
 
         const user = result.rows[0];
         const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(400).json({ message: 'Invalid Credentials' });
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Invalid Credentials' });
+        }
 
         const token = jwt.sign(
             { 
