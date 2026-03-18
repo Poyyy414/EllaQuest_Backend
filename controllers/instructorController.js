@@ -191,8 +191,8 @@ const getMySections = async (req, res) => {
                 s.is_active,
                 s.created_at,
                 c.course_id,
-                c.title      AS course_title,
-                c.course_code,
+                c.course_name,
+                c.description,
                 COUNT(ss.ss_id) FILTER (WHERE ss.status = 'approved') AS total_students
              FROM section s
              JOIN course c                ON s.course_id  = c.course_id
@@ -235,8 +235,8 @@ const getMySectionById = async (req, res) => {
                 s.is_active,
                 s.created_at,
                 c.course_id,
-                c.title      AS course_title,
-                c.course_code
+                c.course_name,
+                c.description
              FROM section s
              JOIN course c ON s.course_id = c.course_id
              WHERE s.section_id    = $1

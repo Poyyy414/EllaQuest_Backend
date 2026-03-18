@@ -162,8 +162,8 @@ const getMySection = async (req, res) => {
                 s.school_year,
                 s.semester,
                 c.course_id,
-                c.title AS course_title,
-                c.course_code,
+                c.course_name,
+                c.description,
                 u.first_name AS instructor_first_name,
                 u.last_name  AS instructor_last_name
              FROM student_section ss
@@ -212,8 +212,8 @@ const getMySectionById = async (req, res) => {
                 s.school_year,
                 s.semester,
                 c.course_id,
-                c.title AS course_title,
-                c.course_code,
+                c.course_name,
+                c.description,
                 u.first_name AS instructor_first_name,
                 u.last_name  AS instructor_last_name
              FROM student_section ss
