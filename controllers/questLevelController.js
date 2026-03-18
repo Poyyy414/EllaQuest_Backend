@@ -23,7 +23,7 @@ const checkQuestOwnership = async (quest_id, cm_id) => {
 // ================= CREATE QUEST LEVEL =================
 const createQuestLevel = async (req, res) => {
     const { quest_id } = req.params;
-    const { level_number } = req.body;
+    const { level_number, level_title } = req.body;
 
     try {
         if (req.user.role !== 'curriculum_manager') {
@@ -50,10 +50,10 @@ const createQuestLevel = async (req, res) => {
         const is_locked = level_number === 1 ? false : true;
 
         const result = await pool.query(
-            `INSERT INTO quest_level (quest_id, level_number, is_locked)
-             VALUES ($1, $2, $3)
+            `INSERT INTO quest_level (quest_id, level_number, is_locked, level_title)
+             VALUES ($1, $2, $3, $4)
              RETURNING *`,
-            [quest_id, level_number, is_locked]
+            [quest_id, level_number, is_locked, level_title || null]
         );
 
         res.status(201).json({
@@ -154,7 +154,7 @@ const getLevelById = async (req, res) => {
 // ================= UPDATE QUEST LEVEL =================
 const updateQuestLevel = async (req, res) => {
     const { quest_id, quest_level_id } = req.params;
-    const { level_number, is_locked } = req.body;
+    const { level_number, is_locked, level_title } = req.body;
 
     try {
         if (req.user.role !== 'curriculum_manager') {
@@ -175,10 +175,11 @@ const updateQuestLevel = async (req, res) => {
         const result = await pool.query(
             `UPDATE quest_level SET
                 level_number = COALESCE($1, level_number),
-                is_locked = COALESCE($2, is_locked)
-             WHERE quest_level_id = $3
+                is_locked    = COALESCE($2, is_locked),
+                level_title  = COALESCE($3, level_title)
+             WHERE quest_level_id = $4
              RETURNING *`,
-            [level_number, is_locked, quest_level_id]
+            [level_number, is_locked, level_title, quest_level_id]
         );
 
         res.json({
