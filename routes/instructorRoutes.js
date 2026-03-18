@@ -5,7 +5,9 @@ const {
     updateProfile,
     changePassword,
     getAssignedCourses,
-    getStudentsInCourse
+    getStudentsInCourse,
+    getMySections,
+    getMySectionById
 } = require('../controllers/instructorController');
 const { authMiddleware, authorizeRoles } = require('../middleware/authMiddleware');
 
@@ -15,5 +17,7 @@ router.put('/instructor/profile', authMiddleware, authorizeRoles('instructor'), 
 router.put('/instructor/change-password', authMiddleware, authorizeRoles('instructor'), changePassword);
 router.get('/instructor/courses', authMiddleware, authorizeRoles('instructor'), getAssignedCourses);
 router.get('/instructor/courses/:course_id/students', authMiddleware, authorizeRoles('instructor'), getStudentsInCourse);
+router.get('/instructor/my-sections', authMiddleware, authorizeRoles('instructor'), getMySections);
+router.get('/instructor/my-sections/:section_id', authMiddleware, authorizeRoles('instructor'), getMySectionById);
 
 module.exports = router;

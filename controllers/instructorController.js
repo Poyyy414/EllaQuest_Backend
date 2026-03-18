@@ -1,6 +1,16 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 
+// ================= HELPER: GET INSTRUCTOR ID =================
+const getInstructorId = async (user_id) => {
+    const result = await pool.query(
+        'SELECT instructor_id FROM instructor WHERE user_id = $1',
+        [user_id]
+    );
+    if (result.rows.length === 0) throw new Error('Instructor not found');
+    return result.rows[0].instructor_id;
+};
+
 // ================= GET OWN PROFILE =================
 const getProfile = async (req, res) => {
     const user_id = req.user.user_id;
@@ -166,10 +176,118 @@ const getStudentsInCourse = async (req, res) => {
     }
 };
 
+// ================= GET MY SECTIONS =================
+const getMySections = async (req, res) => {
+    try {
+        const instructor_id = await getInstructorId(req.user.user_id);
+
+        const result = await pool.query(
+            `SELECT 
+                s.section_id,
+                s.section_name,
+                s.section_code,
+                s.school_year,
+                s.semester,
+                s.is_active,
+                s.created_at,
+                c.course_id,
+                c.title      AS course_title,
+                c.course_code,
+                COUNT(ss.ss_id) FILTER (WHERE ss.status = 'approved') AS total_students
+             FROM section s
+             JOIN courses c               ON s.course_id  = c.course_id
+             LEFT JOIN student_section ss ON s.section_id = ss.section_id
+             WHERE s.instructor_id = $1
+             GROUP BY s.section_id, c.course_id
+             ORDER BY s.created_at DESC`,
+            [instructor_id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'No sections found' });
+        }
+
+        res.json({
+            message: 'Sections fetched successfully',
+            sections: result.rows
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching sections', error: error.message });
+    }
+};
+
+// ================= GET MY SPECIFIC SECTION WITH STUDENTS =================
+const getMySectionById = async (req, res) => {
+    const { section_id } = req.params;
+
+    try {
+        const instructor_id = await getInstructorId(req.user.user_id);
+
+        // Get section info
+        const sectionResult = await pool.query(
+            `SELECT 
+                s.section_id,
+                s.section_name,
+                s.section_code,
+                s.school_year,
+                s.semester,
+                s.is_active,
+                s.created_at,
+                c.course_id,
+                c.title      AS course_title,
+                c.course_code
+             FROM section s
+             JOIN courses c ON s.course_id = c.course_id
+             WHERE s.section_id    = $1
+               AND s.instructor_id = $2`,
+            [section_id, instructor_id]
+        );
+
+        if (sectionResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Section not found or unauthorized' });
+        }
+
+        // Get all approved students in that section
+        const studentsResult = await pool.query(
+            `SELECT 
+                ss.ss_id,
+                ss.status,
+                ss.enrolled_at,
+                ss.is_active,
+                u.user_id,
+                u.first_name,
+                u.last_name,
+                u.email,
+                st.student_id,
+                st.total_points
+             FROM student_section ss
+             JOIN student st ON ss.student_id = st.student_id
+             JOIN users u    ON st.user_id    = u.user_id
+             WHERE ss.section_id = $1
+               AND ss.status     = 'approved'
+             ORDER BY u.last_name ASC`,
+            [section_id]
+        );
+
+        res.json({
+            message: 'Section fetched successfully',
+            section: sectionResult.rows[0],
+            students: studentsResult.rows,
+            total_students: studentsResult.rows.length
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching section', error: error.message });
+    }
+};
+
 module.exports = {
     getProfile,
     updateProfile,
     changePassword,
     getAssignedCourses,
-    getStudentsInCourse
+    getStudentsInCourse,
+    getMySections,
+    getMySectionById
 };

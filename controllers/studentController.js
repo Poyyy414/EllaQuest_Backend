@@ -1,6 +1,16 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 
+// ================= HELPER: GET STUDENT ID =================
+const getStudentId = async (user_id) => {
+    const result = await pool.query(
+        'SELECT student_id FROM student WHERE user_id = $1',
+        [user_id]
+    );
+    if (result.rows.length === 0) throw new Error('Student not found');
+    return result.rows[0].student_id;
+};
+
 // ================= GET OWN PROFILE =================
 const getProfile = async (req, res) => {
     const user_id = req.user.user_id;
@@ -135,9 +145,125 @@ const getEnrolledCourses = async (req, res) => {
     }
 };
 
+// ================= GET MY SECTIONS =================
+const getMySection = async (req, res) => {
+    try {
+        const student_id = await getStudentId(req.user.user_id);
+
+        const result = await pool.query(
+            `SELECT 
+                ss.ss_id,
+                ss.status,
+                ss.enrolled_at,
+                ss.is_active,
+                s.section_id,
+                s.section_name,
+                s.section_code,
+                s.school_year,
+                s.semester,
+                c.course_id,
+                c.title AS course_title,
+                c.course_code,
+                u.first_name AS instructor_first_name,
+                u.last_name  AS instructor_last_name
+             FROM student_section ss
+             JOIN section s       ON ss.section_id   = s.section_id
+             JOIN courses c       ON s.course_id     = c.course_id
+             JOIN instructor i    ON s.instructor_id = i.instructor_id
+             JOIN users u         ON i.user_id       = u.user_id
+             WHERE ss.student_id = $1
+               AND ss.status     = 'approved'
+               AND ss.is_active  = true
+             ORDER BY ss.enrolled_at DESC`,
+            [student_id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'You are not enrolled in any section' });
+        }
+
+        res.json({
+            message: 'Enrolled sections fetched successfully',
+            sections: result.rows
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching sections', error: error.message });
+    }
+};
+
+// ================= GET MY SPECIFIC SECTION WITH CLASSMATES =================
+const getMySectionById = async (req, res) => {
+    const { section_id } = req.params;
+
+    try {
+        const student_id = await getStudentId(req.user.user_id);
+
+        // Check if student belongs to this section
+        const result = await pool.query(
+            `SELECT 
+                ss.ss_id,
+                ss.status,
+                ss.enrolled_at,
+                ss.is_active,
+                s.section_id,
+                s.section_name,
+                s.section_code,
+                s.school_year,
+                s.semester,
+                c.course_id,
+                c.title AS course_title,
+                c.course_code,
+                u.first_name AS instructor_first_name,
+                u.last_name  AS instructor_last_name
+             FROM student_section ss
+             JOIN section s       ON ss.section_id   = s.section_id
+             JOIN courses c       ON s.course_id     = c.course_id
+             JOIN instructor i    ON s.instructor_id = i.instructor_id
+             JOIN users u         ON i.user_id       = u.user_id
+             WHERE ss.student_id = $1
+               AND ss.section_id = $2
+               AND ss.status     = 'approved'`,
+            [student_id, section_id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'Section not found or you are not enrolled' });
+        }
+
+        // Get classmates (excluding the student themselves)
+        const classmates = await pool.query(
+            `SELECT 
+                u.first_name,
+                u.last_name,
+                st.total_points
+             FROM student_section ss
+             JOIN student st ON ss.student_id = st.student_id
+             JOIN users u    ON st.user_id    = u.user_id
+             WHERE ss.section_id = $1
+               AND ss.status     = 'approved'
+               AND ss.student_id != $2
+             ORDER BY u.last_name ASC`,
+            [section_id, student_id]
+        );
+
+        res.json({
+            message: 'Section fetched successfully',
+            section: result.rows[0],
+            classmates: classmates.rows,
+            total_classmates: classmates.rows.length
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching section', error: error.message });
+    }
+};
+
 module.exports = {
     getProfile,
     updateProfile,
     changePassword,
-    getEnrolledCourses
+    getEnrolledCourses,
+    getMySection,
+    getMySectionById
 };
