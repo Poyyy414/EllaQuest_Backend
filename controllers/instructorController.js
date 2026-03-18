@@ -195,7 +195,7 @@ const getMySections = async (req, res) => {
                 c.course_code,
                 COUNT(ss.ss_id) FILTER (WHERE ss.status = 'approved') AS total_students
              FROM section s
-             JOIN courses c               ON s.course_id  = c.course_id
+             JOIN course c                ON s.course_id  = c.course_id
              LEFT JOIN student_section ss ON s.section_id = ss.section_id
              WHERE s.instructor_id = $1
              GROUP BY s.section_id, c.course_id
