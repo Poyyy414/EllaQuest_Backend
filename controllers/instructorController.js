@@ -238,7 +238,7 @@ const getMySectionById = async (req, res) => {
                 c.title      AS course_title,
                 c.course_code
              FROM section s
-             JOIN courses c ON s.course_id = c.course_id
+             JOIN course c ON s.course_id = c.course_id
              WHERE s.section_id    = $1
                AND s.instructor_id = $2`,
             [section_id, instructor_id]

@@ -218,7 +218,7 @@ const getMySectionById = async (req, res) => {
                 u.last_name  AS instructor_last_name
              FROM student_section ss
              JOIN section s       ON ss.section_id   = s.section_id
-             JOIN courses c       ON s.course_id     = c.course_id
+             JOIN course c       ON s.course_id     = c.course_id
              JOIN instructor i    ON s.instructor_id = i.instructor_id
              JOIN users u         ON i.user_id       = u.user_id
              WHERE ss.student_id = $1
