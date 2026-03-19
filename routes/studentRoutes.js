@@ -11,6 +11,8 @@ const {
     getQuestById
 } = require('../controllers/studentController');
 
+const { joinSection } = require('../controllers/sectionController');
+
 const { authMiddleware, authorizeRoles } = require('../middleware/authMiddleware');
 
 // ================= PROFILE =================
@@ -20,6 +22,7 @@ router.put('/student/change-password', authMiddleware, authorizeRoles('student')
 router.get('/student/courses', authMiddleware, authorizeRoles('student'), getEnrolledCourses);
 
 // ================= SECTIONS =================
+router.post('/student/join-section', authMiddleware, authorizeRoles('student'), joinSection);
 router.get('/student/my-section', authMiddleware, authorizeRoles('student'), getMySection);
 router.get('/student/my-section/:section_id', authMiddleware, authorizeRoles('student'), getMySectionById);
 

@@ -8,12 +8,10 @@ const {
     deleteSection,
     updateStudentStatus,
     getPendingStudents,
-    joinSection
+
 } = require('../controllers/sectionController');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
-// ✅ Specific routes FIRST
-router.post('/join', authMiddleware, joinSection);
 
 // Section CRUD
 router.post('/', authMiddleware, createSection);
