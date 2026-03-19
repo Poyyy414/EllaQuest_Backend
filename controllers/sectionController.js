@@ -97,7 +97,7 @@ const getSectionsByCourse = async (req, res) => {
                     COUNT(CASE WHEN ss.status = 'pending' THEN 1 END) as pending_students,
                     COUNT(CASE WHEN ss.status = 'approved' THEN 1 END) as approved_students
              FROM section s
-             LEFT JOIN section_student ss ON s.section_id = ss.section_id
+             LEFT JOIN student_section ss ON s.section_id = ss.section_id
              WHERE s.course_id = $1
              GROUP BY s.section_id
              ORDER BY s.created_at DESC`,
@@ -137,7 +137,7 @@ const getSectionById = async (req, res) => {
             `SELECT ss.ss_id, ss.status, ss.enrolled_at, ss.is_active,
                     u.first_name, u.last_name, u.email,
                     st.student_id, st.total_points
-             FROM section_student ss
+             FROM student_section ss
              JOIN student st ON ss.student_id = st.student_id
              JOIN users u ON st.user_id = u.user_id
              WHERE ss.section_id = $1
@@ -178,9 +178,9 @@ const updateSection = async (req, res) => {
         const result = await pool.query(
             `UPDATE section SET
                 section_name = COALESCE($1, section_name),
-                school_year = COALESCE($2, school_year),
-                semester = COALESCE($3, semester),
-                is_active = COALESCE($4, is_active)
+                school_year  = COALESCE($2, school_year),
+                semester     = COALESCE($3, semester),
+                is_active    = COALESCE($4, is_active)
              WHERE section_id = $5
              RETURNING *`,
             [section_name, school_year, semester, is_active, section_id]
@@ -250,7 +250,7 @@ const updateStudentStatus = async (req, res) => {
         }
 
         const result = await pool.query(
-            `UPDATE section_student SET status = $1
+            `UPDATE student_section SET status = $1
              WHERE ss_id = $2 AND section_id = $3
              RETURNING *`,
             [status, ss_id, section_id]
@@ -293,7 +293,7 @@ const getPendingStudents = async (req, res) => {
             `SELECT ss.ss_id, ss.enrolled_at,
                     u.first_name, u.last_name, u.email,
                     st.student_id
-             FROM section_student ss
+             FROM student_section ss
              JOIN student st ON ss.student_id = st.student_id
              JOIN users u ON st.user_id = u.user_id
              WHERE ss.section_id = $1 AND ss.status = 'pending'
@@ -339,7 +339,7 @@ const joinSection = async (req, res) => {
 
         // Check if already enrolled
         const existing = await pool.query(
-            'SELECT * FROM section_student WHERE student_id = $1 AND section_id = $2',
+            'SELECT * FROM student_section WHERE student_id = $1 AND section_id = $2',
             [student_id, section.section_id]
         );
         if (existing.rows.length > 0) {
@@ -350,7 +350,7 @@ const joinSection = async (req, res) => {
 
         // Insert with pending status
         const result = await pool.query(
-            `INSERT INTO section_student (student_id, section_id, status)
+            `INSERT INTO student_section (student_id, section_id, status)
              VALUES ($1, $2, 'pending')
              RETURNING *`,
             [student_id, section.section_id]
