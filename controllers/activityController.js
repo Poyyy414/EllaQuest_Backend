@@ -51,7 +51,7 @@ const getActivityByLevel = async (req, res) => {
 
     try {
         const result = await pool.query(
-            `SELECT a.*, COUNT(aq.question_id) as total_questions
+            `SELECT a.*, COUNT(aq.activity_question_id) as total_questions
              FROM activity a
              LEFT JOIN activity_question aq ON a.activity_id = aq.activity_id
              WHERE a.quest_level_id = $1
@@ -87,22 +87,21 @@ const getActivityWithQuestions = async (req, res) => {
             return res.status(404).json({ message: 'Activity not found' });
         }
 
-        // CM sees all questions with is_correct
         const questions = await pool.query(
-            `SELECT aq.question_id, aq.question_text, aq.question_type,
+            `SELECT aq.activity_question_id, aq.question_text, aq.question_type,
                     aq.media_url, aq.order_index,
                     json_agg(
                         json_build_object(
-                            'answer_id', aa.answer_id,
+                            'activity_answer_id', aa.activity_answer_id,
                             'answer_text', aa.answer_text,
                             'is_correct', aa.is_correct,
                             'order_index', aa.order_index
                         ) ORDER BY aa.order_index
                     ) as answers
              FROM activity_question aq
-             LEFT JOIN activity_answer aa ON aq.question_id = aa.question_id
+             LEFT JOIN activity_answer aa ON aq.activity_question_id = aa.question_id
              WHERE aq.activity_id = $1
-             GROUP BY aq.question_id
+             GROUP BY aq.activity_question_id
              ORDER BY aq.order_index`,
             [activity_id]
         );
@@ -128,7 +127,6 @@ const getNextQuestion = async (req, res) => {
 
         const student_id = await getStudentId(req.user.user_id);
 
-        // Check activity exists
         const activityResult = await pool.query(
             'SELECT * FROM activity WHERE activity_id = $1',
             [activity_id]
@@ -163,52 +161,52 @@ const getNextQuestion = async (req, res) => {
             });
         }
 
-        // Get next unanswered question (randomized from unanswered pool)
+        // Get next unanswered question
         let nextQuestion;
 
         if (answeredIds.length > 0) {
             nextQuestion = await pool.query(
-                `SELECT aq.question_id, aq.question_text, aq.question_type,
+                `SELECT aq.activity_question_id, aq.question_text, aq.question_type,
                         aq.media_url, aq.order_index,
                         CASE 
                             WHEN aq.question_type IN ('identification', 'fill_in_blank') 
                             THEN '[]'::json
                             ELSE json_agg(
                                 json_build_object(
-                                    'answer_id', aa.answer_id,
+                                    'activity_answer_id', aa.activity_answer_id,
                                     'answer_text', aa.answer_text,
                                     'order_index', aa.order_index
                                 ) ORDER BY RANDOM()
                             )
                         END as answers
                  FROM activity_question aq
-                 LEFT JOIN activity_answer aa ON aq.question_id = aa.question_id
+                 LEFT JOIN activity_answer aa ON aq.activity_question_id = aa.question_id
                  WHERE aq.activity_id = $1
-                 AND aq.question_id NOT IN (${answeredIds.join(',')})
-                 GROUP BY aq.question_id
+                 AND aq.activity_question_id NOT IN (${answeredIds.join(',')})
+                 GROUP BY aq.activity_question_id
                  ORDER BY RANDOM()
                  LIMIT 1`,
                 [activity_id]
             );
         } else {
             nextQuestion = await pool.query(
-                `SELECT aq.question_id, aq.question_text, aq.question_type,
+                `SELECT aq.activity_question_id, aq.question_text, aq.question_type,
                         aq.media_url, aq.order_index,
                         CASE 
                             WHEN aq.question_type IN ('identification', 'fill_in_blank') 
                             THEN '[]'::json
                             ELSE json_agg(
                                 json_build_object(
-                                    'answer_id', aa.answer_id,
+                                    'activity_answer_id', aa.activity_answer_id,
                                     'answer_text', aa.answer_text,
                                     'order_index', aa.order_index
                                 ) ORDER BY RANDOM()
                             )
                         END as answers
                  FROM activity_question aq
-                 LEFT JOIN activity_answer aa ON aq.question_id = aa.question_id
+                 LEFT JOIN activity_answer aa ON aq.activity_question_id = aa.question_id
                  WHERE aq.activity_id = $1
-                 GROUP BY aq.question_id
+                 GROUP BY aq.activity_question_id
                  ORDER BY RANDOM()
                  LIMIT 1`,
                 [activity_id]
@@ -283,7 +281,7 @@ const addQuestion = async (req, res) => {
              RETURNING *`,
             [activity_id, question_text, question_type, media_url, order_index]
         );
-        const question_id = questionResult.rows[0].question_id;
+        const activity_question_id = questionResult.rows[0].activity_question_id;
 
         const insertedAnswers = [];
         for (const answer of answers) {
@@ -291,7 +289,7 @@ const addQuestion = async (req, res) => {
                 `INSERT INTO activity_answer (question_id, activity_id, answer_text, is_correct, order_index)
                  VALUES ($1, $2, $3, $4, $5)
                  RETURNING *`,
-                [question_id, activity_id, answer.answer_text, answer.is_correct, answer.order_index]
+                [activity_question_id, activity_id, answer.answer_text, answer.is_correct, answer.order_index]
             );
             insertedAnswers.push(answerResult.rows[0]);
         }
@@ -323,7 +321,7 @@ const updateQuestion = async (req, res) => {
                 question_type = COALESCE($2, question_type),
                 media_url = COALESCE($3, media_url),
                 order_index = COALESCE($4, order_index)
-             WHERE question_id = $5
+             WHERE activity_question_id = $5
              RETURNING *`,
             [question_text, question_type, media_url, order_index, question_id]
         );
@@ -349,7 +347,7 @@ const deleteQuestion = async (req, res) => {
         }
 
         const result = await pool.query(
-            'DELETE FROM activity_question WHERE question_id = $1 RETURNING *',
+            'DELETE FROM activity_question WHERE activity_question_id = $1 RETURNING *',
             [question_id]
         );
 
@@ -444,7 +442,7 @@ const submitAnswer = async (req, res) => {
 
         // Get question
         const questionResult = await pool.query(
-            'SELECT * FROM activity_question WHERE question_id = $1 AND activity_id = $2',
+            'SELECT * FROM activity_question WHERE activity_question_id = $1 AND activity_id = $2',
             [question_id, activity_id]
         );
         if (questionResult.rows.length === 0) {
@@ -467,7 +465,7 @@ const submitAnswer = async (req, res) => {
             isCorrect = correctAnswer.rows[0].answer_text.toLowerCase().trim() ===
                         answer_text?.toLowerCase().trim();
         } else {
-            isCorrect = correctAnswer.rows.some(a => a.answer_id === parseInt(answer_id));
+            isCorrect = correctAnswer.rows.some(a => a.activity_answer_id === parseInt(answer_id));
         }
 
         // Save to DB
@@ -478,7 +476,7 @@ const submitAnswer = async (req, res) => {
             [student_id, activity_id, question_id, answer_id || null, answer_text || null, isCorrect]
         );
 
-        // Check how many answered so far
+        // Count answered so far
         const answeredResult = await pool.query(
             `SELECT COUNT(*) as total FROM student_activity_answer
              WHERE student_id = $1 AND activity_id = $2`,
@@ -486,7 +484,6 @@ const submitAnswer = async (req, res) => {
         );
         const answered_count = parseInt(answeredResult.rows[0].total);
 
-        // Get total questions (max 10)
         const totalResult = await pool.query(
             'SELECT COUNT(*) as total FROM activity_question WHERE activity_id = $1',
             [activity_id]
@@ -519,7 +516,6 @@ const finishActivity = async (req, res) => {
 
         const student_id = await getStudentId(req.user.user_id);
 
-        // Get activity
         const activityResult = await pool.query(
             'SELECT * FROM activity WHERE activity_id = $1',
             [activity_id]
@@ -529,7 +525,6 @@ const finishActivity = async (req, res) => {
         }
         const activity = activityResult.rows[0];
 
-        // Count score
         const scoreResult = await pool.query(
             `SELECT 
                 COUNT(*) as total_answered,
@@ -546,13 +541,11 @@ const finishActivity = async (req, res) => {
         const percentage = total_items > 0 ? ((score / total_items) * 100).toFixed(2) : '0.00';
 
         if (is_passed) {
-            // Unlock quiz
             await pool.query(
                 `UPDATE quiz SET is_locked = false WHERE quest_level_id = $1`,
                 [activity.quest_level_id]
             );
 
-            // Update student progress
             await pool.query(
                 `INSERT INTO student_progress 
                  (student_id, quest_id, quest_level_id, activity_passed, quiz_unlocked, level_status)
@@ -567,7 +560,6 @@ const finishActivity = async (req, res) => {
                 [student_id, activity.quest_level_id]
             );
         } else {
-            // Clear answers so student can retry
             await pool.query(
                 `DELETE FROM student_activity_answer 
                  WHERE student_id = $1 AND activity_id = $2`,

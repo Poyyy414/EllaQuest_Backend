@@ -20,7 +20,6 @@ const createQuiz = async (req, res) => {
             return res.status(403).json({ message: 'Only curriculum managers can create quizzes' });
         }
 
-        // Check if quiz already exists for this level
         const existing = await pool.query(
             'SELECT * FROM quiz WHERE quest_level_id = $1',
             [quest_level_id]
@@ -52,7 +51,7 @@ const getQuizByLevel = async (req, res) => {
 
     try {
         const result = await pool.query(
-            `SELECT q.*, COUNT(qq.question_id) as total_questions
+            `SELECT q.*, COUNT(qq.quiz_question_id) as total_questions
              FROM quiz q
              LEFT JOIN quiz_question qq ON q.quiz_id = qq.quiz_id
              WHERE q.quest_level_id = $1
@@ -89,20 +88,20 @@ const getQuizWithQuestions = async (req, res) => {
         }
 
         const questions = await pool.query(
-            `SELECT qq.question_id, qq.question_text, qq.question_type,
+            `SELECT qq.quiz_question_id, qq.question_text, qq.question_type,
                     qq.points, qq.media_url, qq.order_index,
                     json_agg(
                         json_build_object(
-                            'answer_id', qa.answer_id,
+                            'quiz_answer_id', qa.quiz_answer_id,
                             'answer_text', qa.answer_text,
                             'is_correct', qa.is_correct,
                             'order_index', qa.order_index
                         ) ORDER BY qa.order_index
                     ) as answers
              FROM quiz_question qq
-             LEFT JOIN quiz_answer qa ON qq.question_id = qa.question_id
+             LEFT JOIN quiz_answer qa ON qq.quiz_question_id = qa.question_id
              WHERE qq.quiz_id = $1
-             GROUP BY qq.question_id
+             GROUP BY qq.quiz_question_id
              ORDER BY qq.order_index`,
             [quiz_id]
         );
@@ -128,7 +127,6 @@ const getNextQuestion = async (req, res) => {
 
         const student_id = await getStudentId(req.user.user_id);
 
-        // Get quiz
         const quizResult = await pool.query(
             'SELECT * FROM quiz WHERE quiz_id = $1',
             [quiz_id]
@@ -138,19 +136,16 @@ const getNextQuestion = async (req, res) => {
         }
         const quiz = quizResult.rows[0];
 
-        // Check if quiz is locked
         if (quiz.is_locked) {
             return res.status(403).json({ message: 'Quiz is locked! Pass the activity first.' });
         }
 
-        // Get total questions
         const totalResult = await pool.query(
             'SELECT COUNT(*) as total FROM quiz_question WHERE quiz_id = $1',
             [quiz_id]
         );
         const total_questions = Math.min(parseInt(totalResult.rows[0].total), 10);
 
-        // Get already answered question IDs
         const answeredResult = await pool.query(
             `SELECT question_id FROM student_quiz_answer
              WHERE student_id = $1 AND quiz_id = $2`,
@@ -159,7 +154,6 @@ const getNextQuestion = async (req, res) => {
         const answeredIds = answeredResult.rows.map(r => r.question_id);
         const answered_count = answeredIds.length;
 
-        // If all questions answered
         if (answered_count >= total_questions) {
             return res.json({
                 message: 'All questions answered! Click finish to see your score.',
@@ -169,51 +163,50 @@ const getNextQuestion = async (req, res) => {
             });
         }
 
-        // Get next unanswered question
         let nextQuestion;
         if (answeredIds.length > 0) {
             nextQuestion = await pool.query(
-                `SELECT qq.question_id, qq.question_text, qq.question_type,
+                `SELECT qq.quiz_question_id, qq.question_text, qq.question_type,
                         qq.points, qq.media_url, qq.order_index,
                         CASE 
                             WHEN qq.question_type IN ('identification', 'fill_in_blank') 
                             THEN '[]'::json
                             ELSE json_agg(
                                 json_build_object(
-                                    'answer_id', qa.answer_id,
+                                    'quiz_answer_id', qa.quiz_answer_id,
                                     'answer_text', qa.answer_text,
                                     'order_index', qa.order_index
                                 ) ORDER BY RANDOM()
                             )
                         END as answers
                  FROM quiz_question qq
-                 LEFT JOIN quiz_answer qa ON qq.question_id = qa.question_id
+                 LEFT JOIN quiz_answer qa ON qq.quiz_question_id = qa.question_id
                  WHERE qq.quiz_id = $1
-                 AND qq.question_id NOT IN (${answeredIds.join(',')})
-                 GROUP BY qq.question_id
+                 AND qq.quiz_question_id NOT IN (${answeredIds.join(',')})
+                 GROUP BY qq.quiz_question_id
                  ORDER BY RANDOM()
                  LIMIT 1`,
                 [quiz_id]
             );
         } else {
             nextQuestion = await pool.query(
-                `SELECT qq.question_id, qq.question_text, qq.question_type,
+                `SELECT qq.quiz_question_id, qq.question_text, qq.question_type,
                         qq.points, qq.media_url, qq.order_index,
                         CASE 
                             WHEN qq.question_type IN ('identification', 'fill_in_blank') 
                             THEN '[]'::json
                             ELSE json_agg(
                                 json_build_object(
-                                    'answer_id', qa.answer_id,
+                                    'quiz_answer_id', qa.quiz_answer_id,
                                     'answer_text', qa.answer_text,
                                     'order_index', qa.order_index
                                 ) ORDER BY RANDOM()
                             )
                         END as answers
                  FROM quiz_question qq
-                 LEFT JOIN quiz_answer qa ON qq.question_id = qa.question_id
+                 LEFT JOIN quiz_answer qa ON qq.quiz_question_id = qa.question_id
                  WHERE qq.quiz_id = $1
-                 GROUP BY qq.question_id
+                 GROUP BY qq.quiz_question_id
                  ORDER BY RANDOM()
                  LIMIT 1`,
                 [quiz_id]
@@ -288,7 +281,7 @@ const addQuestion = async (req, res) => {
              RETURNING *`,
             [quiz_id, question_text, question_type, points || 1, media_url, order_index]
         );
-        const question_id = questionResult.rows[0].question_id;
+        const quiz_question_id = questionResult.rows[0].quiz_question_id;
 
         const insertedAnswers = [];
         for (const answer of answers) {
@@ -296,7 +289,7 @@ const addQuestion = async (req, res) => {
                 `INSERT INTO quiz_answer (question_id, quiz_id, answer_text, is_correct, order_index)
                  VALUES ($1, $2, $3, $4, $5)
                  RETURNING *`,
-                [question_id, quiz_id, answer.answer_text, answer.is_correct, answer.order_index]
+                [quiz_question_id, quiz_id, answer.answer_text, answer.is_correct, answer.order_index]
             );
             insertedAnswers.push(answerResult.rows[0]);
         }
@@ -329,7 +322,7 @@ const updateQuestion = async (req, res) => {
                 points = COALESCE($3, points),
                 media_url = COALESCE($4, media_url),
                 order_index = COALESCE($5, order_index)
-             WHERE question_id = $6
+             WHERE quiz_question_id = $6
              RETURNING *`,
             [question_text, question_type, points, media_url, order_index, question_id]
         );
@@ -355,7 +348,7 @@ const deleteQuestion = async (req, res) => {
         }
 
         const result = await pool.query(
-            'DELETE FROM quiz_question WHERE question_id = $1 RETURNING *',
+            'DELETE FROM quiz_question WHERE quiz_question_id = $1 RETURNING *',
             [question_id]
         );
 
@@ -439,7 +432,6 @@ const submitAnswer = async (req, res) => {
 
         const student_id = await getStudentId(req.user.user_id);
 
-        // Check quiz is not locked
         const quizResult = await pool.query(
             'SELECT * FROM quiz WHERE quiz_id = $1',
             [quiz_id]
@@ -451,7 +443,6 @@ const submitAnswer = async (req, res) => {
             return res.status(403).json({ message: 'Quiz is locked! Pass the activity first.' });
         }
 
-        // Check already answered
         const alreadyAnswered = await pool.query(
             `SELECT * FROM student_quiz_answer 
              WHERE student_id = $1 AND question_id = $2 AND quiz_id = $3`,
@@ -461,9 +452,8 @@ const submitAnswer = async (req, res) => {
             return res.status(400).json({ message: 'You already answered this question' });
         }
 
-        // Get question
         const questionResult = await pool.query(
-            'SELECT * FROM quiz_question WHERE question_id = $1 AND quiz_id = $2',
+            'SELECT * FROM quiz_question WHERE quiz_question_id = $1 AND quiz_id = $2',
             [question_id, quiz_id]
         );
         if (questionResult.rows.length === 0) {
@@ -471,7 +461,6 @@ const submitAnswer = async (req, res) => {
         }
         const question = questionResult.rows[0];
 
-        // Get correct answer
         const correctAnswer = await pool.query(
             'SELECT * FROM quiz_answer WHERE question_id = $1 AND is_correct = true',
             [question_id]
@@ -486,10 +475,9 @@ const submitAnswer = async (req, res) => {
             isCorrect = correctAnswer.rows[0].answer_text.toLowerCase().trim() ===
                         answer_text?.toLowerCase().trim();
         } else {
-            isCorrect = correctAnswer.rows.some(a => a.answer_id === parseInt(answer_id));
+            isCorrect = correctAnswer.rows.some(a => a.quiz_answer_id === parseInt(answer_id));
         }
 
-        // Save to DB
         await pool.query(
             `INSERT INTO student_quiz_answer 
              (student_id, quiz_id, question_id, answer_id, answer_text, is_correct)
@@ -497,7 +485,6 @@ const submitAnswer = async (req, res) => {
             [student_id, quiz_id, question_id, answer_id || null, answer_text || null, isCorrect]
         );
 
-        // Count answered so far
         const answeredResult = await pool.query(
             `SELECT COUNT(*) as total FROM student_quiz_answer
              WHERE student_id = $1 AND quiz_id = $2`,
@@ -537,7 +524,6 @@ const finishQuiz = async (req, res) => {
 
         const student_id = await getStudentId(req.user.user_id);
 
-        // Get quiz
         const quizResult = await pool.query(
             'SELECT * FROM quiz WHERE quiz_id = $1',
             [quiz_id]
@@ -547,7 +533,6 @@ const finishQuiz = async (req, res) => {
         }
         const quiz = quizResult.rows[0];
 
-        // Count score
         const scoreResult = await pool.query(
             `SELECT 
                 COUNT(*) as total_answered,
@@ -572,7 +557,6 @@ const finishQuiz = async (req, res) => {
                 [quiz.quest_level_id]
             );
 
-            // Update student progress
             await pool.query(
                 `INSERT INTO student_progress 
                  (student_id, quest_id, quest_level_id, activity_passed, quiz_unlocked, level_status)
@@ -587,16 +571,13 @@ const finishQuiz = async (req, res) => {
                 [student_id, quiz.quest_level_id, score]
             );
 
-            // Save assessment result
             await pool.query(
                 `INSERT INTO assessment_result
                  (student_id, quest_level_id, quiz_id, source_type, raw_score, total_items, percentage, is_passed, points_earned)
                  VALUES ($1, $2, $3, 'quiz', $4, $5, $6, true, $7)`,
                 [student_id, quiz.quest_level_id, quiz_id, score, total_items, percentage, score * 10]
             );
-
         } else {
-            // Update attempts
             await pool.query(
                 `INSERT INTO student_progress 
                  (student_id, quest_id, quest_level_id, activity_passed, quiz_unlocked, level_status)
@@ -609,7 +590,6 @@ const finishQuiz = async (req, res) => {
                 [student_id, quiz.quest_level_id]
             );
 
-            // Clear answers for retry
             await pool.query(
                 `DELETE FROM student_quiz_answer 
                  WHERE student_id = $1 AND quiz_id = $2`,
