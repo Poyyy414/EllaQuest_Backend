@@ -1,75 +1,81 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const pool = require('./database');
-const bcrypt = require('bcrypt');
-
-const studentEmailRegex = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
-const instructorEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
+const jwt = require('jsonwebtoken');
 
 passport.use(new GoogleStrategy({
-    clientID:     process.env.GOOGLE_CLIENT_ID,
+    clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL:  process.env.GOOGLE_CALLBACK_URL  // e.g. http://localhost:3000/api/auth/google/callback
-  },
-  async (accessToken, refreshToken, profile, done) => {
+    callbackURL: process.env.GOOGLE_CALLBACK_URL,
+},
+async (accessToken, refreshToken, profile, done) => {
     try {
-      const email = profile.emails?.[0]?.value;
+        const email = profile.emails[0].value;
+        const first_name = profile.name.givenName;
+        const last_name = profile.name.familyName;
 
-      // ── Domain restriction ──────────────────────────────────────────────
-      if (!studentEmailRegex.test(email) && !instructorEmailRegex.test(email)) {
-        return done(null, false, {
-          message: 'Only @gbox.ncf.edu.ph (students) or @ncf.edu.ph (instructors) emails are allowed.'
-        });
-      }
+        // Validate email domain
+        const studentEmailRegex = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
+        const instructorEmailRegex = /^[^\s@]+@ncf\.edu\.ph$/;
 
-      // ── Determine role ──────────────────────────────────────────────────
-      const role = studentEmailRegex.test(email) ? 'student' : 'instructor';
+        let role = null;
+        if (studentEmailRegex.test(email)) role = 'student';
+        else if (instructorEmailRegex.test(email)) role = 'instructor';
+        else {
+            return done(null, false, { message: 'Only NCF emails are allowed' });
+        }
 
-      // ── Check if user already exists ────────────────────────────────────
-      const existing = await pool.query(
-        `SELECT u.user_id, u.first_name, u.last_name, r.role_name
-         FROM users u
-         JOIN roles r ON u.role_id = r.role_id
-         WHERE u.email = $1`,
-        [email]
-      );
+        // Check if user already exists
+        const existingUser = await pool.query(
+            `SELECT u.user_id, u.first_name, u.last_name, r.role_name
+             FROM users u
+             JOIN roles r ON u.role_id = r.role_id
+             WHERE u.email = $1`,
+            [email]
+        );
 
-      if (existing.rows.length > 0) {
-        return done(null, existing.rows[0]);   // existing user → just log in
-      }
+        let user;
 
-      // ── Auto-register new user ──────────────────────────────────────────
-      const first_name = profile.name?.givenName  || profile.displayName || 'User';
-      const last_name  = profile.name?.familyName || '';
+        if (existingUser.rows.length > 0) {
+            // User exists — just login
+            user = existingUser.rows[0];
+        } else {
+            // New user — auto register
+            const roleResult = await pool.query(
+                'SELECT role_id FROM roles WHERE role_name = $1', [role]
+            );
+            const role_id = roleResult.rows[0].role_id;
 
-      // Random unguessable password (user will never log in with it)
-      const hashedPassword = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
+            const newUser = await pool.query(
+                `INSERT INTO users (first_name, last_name, email, role_id)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING user_id, first_name, last_name`,
+                [first_name, last_name, email, role_id]
+            );
+            const user_id = newUser.rows[0].user_id;
 
-      const roleResult = await pool.query(
-        'SELECT role_id FROM roles WHERE role_name = $1', [role]
-      );
-      if (roleResult.rows.length === 0) return done(new Error('Role not found'));
-      const role_id = roleResult.rows[0].role_id;
+            // Insert into role table
+            if (role === 'student') {
+                await pool.query(
+                    'INSERT INTO student (user_id) VALUES ($1)', [user_id]
+                );
+            } else if (role === 'instructor') {
+                await pool.query(
+                    'INSERT INTO instructor (user_id) VALUES ($1)', [user_id]
+                );
+            }
 
-      const userResult = await pool.query(
-        `INSERT INTO users (first_name, last_name, email, password, role_id)
-         VALUES ($1, $2, $3, $4, $5) RETURNING user_id, first_name, last_name`,
-        [first_name, last_name, email, hashedPassword, role_id]
-      );
-      const newUser = userResult.rows[0];
+            user = { ...newUser.rows[0], role_name: role };
+        }
 
-      if (role === 'student') {
-        await pool.query('INSERT INTO student (user_id) VALUES ($1)', [newUser.user_id]);
-      } else {
-        await pool.query('INSERT INTO instructor (user_id) VALUES ($1)', [newUser.user_id]);
-      }
+        return done(null, user);
 
-      return done(null, { ...newUser, role_name: role });
-
-    } catch (err) {
-      return done(err);
+    } catch (error) {
+        return done(error, null);
     }
-  }
-));
+}));
+
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((user, done) => done(null, user));
 
 module.exports = passport;
