@@ -1,6 +1,7 @@
 const pool = require('../config/database');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 // ================= SHARED HELPERS =================
 const studentEmailRegex    = /^[^\s@]+@gbox\.ncf\.edu\.ph$/;
@@ -51,7 +52,7 @@ const login = async (req, res) => {
     }
 };
 
-// ================= CREATE ACCOUNT (Admin only — CM and Admin accounts) =================
+// ================= CREATE ACCOUNT (Admin only — CM and Admin) =================
 const createAccount = async (req, res) => {
     const { first_name, last_name, email, password, role } = req.body;
 
@@ -119,7 +120,6 @@ const googleCallback = (req, res, next) => {
         const { email, first_name, last_name } = googleUser;
 
         try {
-            // Check if already registered
             const existing = await pool.query(
                 `SELECT u.user_id, u.first_name, u.last_name, r.role_name
                  FROM users u
@@ -128,7 +128,7 @@ const googleCallback = (req, res, next) => {
                 [email]
             );
 
-            // CASE A: Existing user → full JWT → dashboard
+            // CASE A: Already registered → full JWT → dashboard
             if (existing.rows.length > 0) {
                 const user  = existing.rows[0];
                 const token = jwt.sign(
@@ -147,12 +147,15 @@ const googleCallback = (req, res, next) => {
                 );
             }
 
-            // CASE B: New user → temp token → registration form
+            // CASE B: New user → temp token with Google profile data
+            // first_name, last_name, email all stored in token
+            // Frontend pre-fills them as read-only, user only sets password
             const ssoTempToken = jwt.sign(
                 {
                     sso_pending: true,
                     email,
-                    google_name: `${first_name} ${last_name}`.trim()
+                    first_name,  // from Google ✅
+                    last_name    // from Google ✅
                 },
                 process.env.JWT_SECRET,
                 { expiresIn: '15m' }
@@ -170,11 +173,14 @@ const googleCallback = (req, res, next) => {
 };
 
 // ================= SSO STEP 3: COMPLETE REGISTRATION =================
+// Body: { sso_token, password }
+// first_name, last_name, email all come from the verified sso_token
+// User only needs to set their password
 const registerSSO = async (req, res) => {
-    const { sso_token, first_name, last_name, password } = req.body;
+    const { sso_token, password } = req.body;
 
     try {
-        // Verify temp token
+        // ── Verify temp token ──────────────────────────────────────────
         let payload;
         try {
             payload = jwt.verify(sso_token, process.env.JWT_SECRET);
@@ -187,9 +193,10 @@ const registerSSO = async (req, res) => {
         if (!payload.sso_pending)
             return res.status(400).json({ message: 'Invalid SSO token.' });
 
-        const { email } = payload;
+        // ── All user info from Google, stored in token ─────────────────
+        const { email, first_name, last_name } = payload;
 
-        // Double-submit protection
+        // ── Double-submit protection ───────────────────────────────────
         const existing = await pool.query(
             'SELECT user_id FROM users WHERE email = $1', [email]
         );
@@ -198,7 +205,7 @@ const registerSSO = async (req, res) => {
                 message: 'Account already exists. Please log in instead.'
             });
 
-        // Validate domain
+        // ── Determine role from email domain ───────────────────────────
         if (!isValidNCFEmail(email))
             return res.status(400).json({
                 message: 'Only @gbox.ncf.edu.ph or @ncf.edu.ph emails are allowed.'
@@ -214,6 +221,7 @@ const registerSSO = async (req, res) => {
         const role_id        = roleResult.rows[0].role_id;
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        // ── Insert user ────────────────────────────────────────────────
         const userResult = await pool.query(
             `INSERT INTO users (first_name, last_name, email, password, role_id)
              VALUES ($1, $2, $3, $4, $5) RETURNING user_id`,
@@ -227,7 +235,10 @@ const registerSSO = async (req, res) => {
             await pool.query('INSERT INTO instructor (user_id) VALUES ($1)', [user_id]);
         }
 
-        res.status(201).json({ message: `Account created successfully as ${role}` });
+        res.status(201).json({ 
+            message: `Account created successfully as ${role}`,
+            role 
+        });
 
     } catch (error) {
         res.status(500).json({ message: 'Error completing registration', error: error.message });
