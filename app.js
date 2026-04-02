@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const passport = require('./config/passport'); // ← add this
 
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
@@ -17,6 +18,7 @@ const quizRoutes = require('./routes/quizRoutes');
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+app.use(passport.initialize()); // ← add this
 
 app.get('/', (req, res) => {
     res.send('Welcome to the Ella Quest API!');
